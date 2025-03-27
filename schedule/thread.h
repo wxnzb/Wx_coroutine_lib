@@ -43,7 +43,7 @@ namespace sylar
         static Thread *GetThis();
         // 这里我感觉没有必要加static把
         // static void SetName(const std::string &name);
-        void SetName(const std::string &name);
+        static void SetName(const std::string &name);
         static const std::string &GetName();
         static pid_t GetThreadId();
 

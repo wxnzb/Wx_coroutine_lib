@@ -1,9 +1,10 @@
 #include <vector>
 #include "thread.h"
 #include "fiber.h"
+namespace sylar{
 class Scheduler{
     public:
-        Scheduler();
+        Scheduler(size_t threads,bool user_caller,const std::string & m_name);
         ~Scheduler();
         const std::string& getName(){return m_name;};
     public:
@@ -70,4 +71,21 @@ class Scheduler{
             thread=-1;
         }
     };
+    private:
+    bool m_user_caller;
+    int m_user_id;
+    //是否正在关闭
+    bool m_stopping;
+    std::string m_name;
+    //调度携程
+    std::shared_ptr<Fiber>m_schedulerFiber;
+    //主线程id
+    int m_rootId=-1;
+    //工作线程的线程id
+    std::vector<int> m_threadIds;
+    //额外需要创建的线程数
+    size_t m_threadNum;
+    std::vector<std::shared_ptr<Thread>> m_threads;
+
 };
+}

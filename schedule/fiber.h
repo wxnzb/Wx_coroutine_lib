@@ -30,7 +30,7 @@ class Fiber:public std::enable_shared_from_this<Fiber>{
         //携程函数
         static void MainFunc();
         //设置调度携程，默认为主携程
-        void SetScheduler(Fiber* f);
+        static void SetScheduler(Fiber* f);
         private:
         uint64_t m_id=0;
         State m_state=READY;
