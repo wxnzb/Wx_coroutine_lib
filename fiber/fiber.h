@@ -27,7 +27,7 @@ class Fiber:public std::enable_shared_from_this<Fiber>{
         static std::shared_ptr<Fiber> GetThis();
         //获取协程id
         uint64_t GetFiberId();//----------------------
-        //携程协程
+        //协程
         static void MainFunc();
         //设置调度协程，默认为主协程
         void SetScheduler(Fiber* f);

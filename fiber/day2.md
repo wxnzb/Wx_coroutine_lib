@@ -30,4 +30,22 @@
 ## 8
 - makecontext(&m_ctx, &Fiber::MainFunc, 0);详细解释
 - m_ctx中保留的是上下文，中间的函数就是在进行上下文切换的时候需要执行的，相当于放在了栈的开始，最后一个是这个函数的参数
+- 不会立即执行 MainFunc()，只是把 MainFunc 绑定到 m_ctx，等到 swapcontext 切换到 m_ctx 时，才会开始执行 MainFunc，其实就是修改了m_ctx
+## 9
+- 为什么Fiber的默认也就是创建主协程的时候，没有设置这些
+```
+ m_ctx.uc_link=nullptr;
+    m_ctx.uc_stack.ss_sp=m_stack;
+    m_ctx.uc_stack.ss_size=m_stacksize;
+```
+- 协程（Main Fiber）是程序启动时的默认执行上下文，它直接运行在主线程的栈上，而子协程（Sub Fiber）是手动创建的，需要单独分配栈空间。
 
+- getcontext(&m_ctx); 获取的就是当前线程的上下文，它默认使用主线程的栈，所以不需要手动指定栈空间。
+
+- 主协程不会 makecontext，因为它是天生就存在的，而子协程需要 makecontext 进行初始化，才会显式地设置 ss_sp（栈指针）和 ss_size（栈大小）
+
+-  Fiber main_fiber;  // 触发无参构造，创建主协程,这个创建主协程的一定会被执行并且被执行一次，另一个创建子协程的就可以被执行多次
+
+## 10
+- m_runInSheduler这个在yeid()中的作用
+- 表示当前协程是否由调度器管理，要是是，就切换到调度器，哟由他决定下一个子协程，要是不是，就直接切换到主协程
