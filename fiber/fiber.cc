@@ -2,12 +2,12 @@
 #include<memory>
 #include<atomic>
 #include<cstdlib>
-//当前线程
-Fiber* t_fiber;
+//当前协程
+Fiber* t_fiber=nullptr;
 //主携程
-std::shared_ptr<Fiber>t_thread_fiber;
+std::shared_ptr<Fiber>t_thread_fiber=nullptr;
 //调度携程
-Fiber* t_scheduler_fiber;
+Fiber* t_scheduler_fiber=nullptr;
 std::atomic<uint64_t>s_fiber_id{0};
 std::atomic<uint64_t>s_fiber_count{0};
 //1
@@ -89,7 +89,7 @@ std::shared_ptr<Fiber> Fiber::GetThis(){
     if(t_fiber){
         return t_fiber->shared_from_this();                                         
     }
-    std::shared_ptr<Fiber> main_thread(new(Fiber));
+    std::shared_ptr<Fiber> main_thread(new Fiber());
     t_thread_fiber=main_thread;
     t_scheduler_fiber=main_thread.get();
     //这里难道不需要设置t_fiber=main_thread.get()吗？

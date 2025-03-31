@@ -4,10 +4,11 @@
 #include "thread.h"
 using namespace sylar;
 void func(){
-    std::cout<<"id"<<Thread::GetThreadId()<<"name"<<Thread::GetName()<<std::endl;
-    std::cout<<"this id"<<Thread::GetThis()->getId()<<"this name"<<Thread::GetThis()->getName()<<std::endl;
+    std::cout<<"id: "<<Thread::GetThreadId()<<"       name: "<<Thread::GetName();
+    std::cout<<"this id: "<<Thread::GetThis()->getId()<<"      this name: "<<Thread::GetThis()->getName()<<std::endl;
     sleep(60);
 }
+// //也可以不使用智能指针
 // int main(){
 //     std::vector<Thread*> ths;
 //     for(int i=0;i<10;i++){

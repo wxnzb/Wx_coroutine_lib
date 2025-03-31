@@ -12,24 +12,24 @@ class Fiber:public std::enable_shared_from_this<Fiber>{
         Fiber();
         Fiber(std::function<void()>cb,size_t stacksize,bool run_in_scheduler);
         ~Fiber();
-        //重置携程
+        //重置协程
         void reset(std::function<void()>cb);
-        //恢复携程
+        //恢复协程
         void resume();
-        //让出携程
+        //让出协程
         void yeid();
         uint64_t  getId(){return m_id;};//-----------------------------
         State getState(){return m_state;};
         public:
-        //设置携程
+        //设置协程
         void SetThis(Fiber* f);
-        //获取携程
+        //获取协程
         static std::shared_ptr<Fiber> GetThis();
-        //获取携程id
+        //获取协程id
         uint64_t GetFiberId();//----------------------
-        //携程函数
+        //携程协程
         static void MainFunc();
-        //设置调度携程，默认为主携程
+        //设置调度协程，默认为主协程
         void SetScheduler(Fiber* f);
         private:
         uint64_t m_id=0;
