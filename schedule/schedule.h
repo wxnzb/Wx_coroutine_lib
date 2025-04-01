@@ -43,32 +43,32 @@ class Scheduler{
     struct ScheduleTask{
         std::shared_ptr<Fiber> fiber;
         std::function<void()>cb;
-        int thread;
+        int thread_id;
         ScheduleTask(std::shared_ptr<Fiber>f,int thread){
             fiber=f;
-            thread=thread;
+            thread_id=thread;
         }
         ScheduleTask(std::shared_ptr<Fiber>*f,int thread){
             fiber.swap(*f);
-            thread=thread;
+            thread_id=thread;
         }
         ScheduleTask(std::function<void()>f,int thread){
             cb=f;
-            thread=thread;
+            thread_id=thread;
         }
         ScheduleTask(std::function<void()>*f,int thread){
             cb.swap(*f);
-            thread=thread;
+            thread_id=thread;
         }
         ScheduleTask(){
             fiber=nullptr;
             cb=nullptr;
-            thread=-1;
+            thread_id=-1;
         }
         void reset(){
             fiber=nullptr;
             cb=nullptr;
-            thread=-1;
+            thread_id=-1;
         }
     };
     private:
@@ -86,6 +86,11 @@ class Scheduler{
     //额外需要创建的线程数
     size_t m_threadNum;
     std::vector<std::shared_ptr<Thread>> m_threads;
-
+    //任务队列
+    std::vector<ScheduleTask> m_tasks;
+    //活跃线程数量
+    int m_activeThreadCount;
+    //空闲线程数量
+    int m_idleThreadCount;
 };
 }

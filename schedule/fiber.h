@@ -4,6 +4,8 @@
 #include<memory>
 class Fiber:public std::enable_shared_from_this<Fiber>{
     public:
+    //锁
+    std::mutex m_mutex;
         enum State{
             READY,
             RUNNING,
