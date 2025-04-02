@@ -1,4 +1,5 @@
 #include "timer.h"
+namespace sylar{
 Timer::Timer(uint64_t ms, std::function<void()> cb, bool recurring, TimeManager *manager) : m_ms(ms), m_cb(cb), m_recurring(recurring), m_manager(manager)
 {
    auto now = std::chrono::steady_clock::now();
@@ -96,7 +97,7 @@ void TimeManager::addTimer(std::shared_ptr<Timer> timer)
 }
 std::shared_ptr<Timer> TimeManager::addTimer(uint64_t ms, std::function<void()> cb, bool recurring)
 {
-   std::shared_ptr<Timer> timer (new Timer(ms, cb, recurring, this));
+   std::shared_ptr<Timer> timer(new Timer(ms, cb, recurring, this));
    addTimer(timer);
    return timer;
 }
@@ -116,4 +117,61 @@ bool TimeManager::hasTimer()
 {
    std::unique_lock<std::shared_mutex> write_lock(m_manager->mutex);
    return !m_timers.empty();
+}
+void TimeManager::listExpiredCb(std::vector<std::function<void()>> &cbs)
+{
+   auto now = std::chrono::steady_clock::now();
+   bool rollover = detectClockRollover();
+   std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+   while ((!m_timers.empty() && rollover) || ((!m_timers.empty() && (*m_timers.begin())->m_next < now)))
+   {
+      auto timer = *m_timers.begin();
+      m_timers.erase(m_timers.begin());
+      if (timer->m_cb)
+      {
+         cbs.push_back(timer->m_cb);
+      }
+      if (recurring)
+      {
+         // auto now=std::chrono::steady_clock::now();直接用上面那个就行吗，不会存在时差吗
+         timer->m_next = now + std::chrono::milliseconds(timer->m_ms);
+         m_timers.insert(timer);
+      }
+      else
+      {
+         timer->m_cb = nullptr;
+      }
+   }
+}
+// 检测系统时钟是否发生回绕（Clock Rollover）
+bool TimeManager::detectClockRollover()
+{
+   bool rollover = false;
+   auto now = std::chrono::steady_clock::now();
+   if (now < m_previousTime - std::chrono::milliseconds(60 * 60 * 1000))
+   {
+      rollover = true;
+   }
+   m_previousTime = now;
+   return rollover;
+}
+// 拿到堆中最近的超时时间
+uint64_t TimeManager::geteralistTime()
+{
+   std::unique_lock<std::shared_mutex> read_lock(m_mutex);
+   // 为什么要加这句??
+   m_tickle = false;
+   if (m_timers.empty())
+   {
+      return ~0ull;
+   }
+   auto time = (*m_timers.begin())->m_next;
+   auto now = std::chrono::steady_clock::now();
+   if (time < now)
+   {
+      return 0;
+   }
+   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time - now).count();
+   return static_cast<uint64_t>(duration);
+}
 }

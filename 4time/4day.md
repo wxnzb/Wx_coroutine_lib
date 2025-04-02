@@ -18,3 +18,12 @@
 ## 5
 - std::unique_lock<std::shared_mutex> write_lock(m_manager->m_mutex);
 - 多个线程可以同时读取，但只有一个线程能修改，避免数据竞争
+
+## 6
+- ~0ull：表示无穷大 (0xFFFFFFFFFFFFFFFF)，即 18446744073709551615（uint64_t 最大值）。
+
+## 7
+- static_cast<目标类型>(表达式)
+- duration.count() 返回的是 long long 类型（取决于平台）。
+- static_cast<uint64_t> 将其转换为 uint64_t 类型，保证返回值符合 getNextTimer() 的返回类型。
+

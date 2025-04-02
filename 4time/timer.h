@@ -5,6 +5,7 @@
 #include<chrono>
 #include<set>
 #include<shared_mutex>
+namespace sylar{
 class Timer:public std::enable_shared_from_this<Timer>{
     friend class TimeManager;
     private:
@@ -34,16 +35,20 @@ class TimeManager{
    public:
    TimeManager();
    ~TimeManager();
-   std::shared_ptr<Timer> addTimer(uint64_t ms,std::function<void()>cb,bool curring);
+   std::shared_ptr<Timer> addTimer(uint64_t ms,std::function<void()>cb,bool recurring);
    std::shared_ptr<Timer> addConditionTimer(uint64_t ms,std::function<void()> cb,bool curring,std::weak_ptr<void> weakcond);
    //堆中是否还有timer
    bool hasTimer();
    //取出所有时间的回调函数
-   void listExpiredCb(std::vector<std::function<void()>>cb);
+   void listExpiredCb(std::vector<std::function<void()>>&cbs);
    //当有一个最早的timer加入堆中，调用它
    void onTimeInsertedAtFront(){};
+   //拿到堆中最近的超时时间
+   uint64_t geteralistTime();
    protected:
    void addTimer(std::shared_ptr<Timer> timer);
+   private:
+   bool detectClockRollover();
    private:
    //时间堆
    std::set<std::shared_ptr<Timer>,Timer::Comparator> m_timers;
@@ -51,4 +56,6 @@ class TimeManager{
    std::shared_mutex m_mutex;//读写锁
    bool m_tickle=false;
    std::chrono::time_point<std::chrono::steady_clock> m_previousTime;
+   bool recurring=false;
 };
+}
