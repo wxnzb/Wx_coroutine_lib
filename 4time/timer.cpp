@@ -52,7 +52,7 @@ bool Timer::reset(uint64_t ms, bool from_now)
       return true;
    }
    {
-      std::unique_lock<std::share_mutex> write_lock(m_manager->m_mutex);
+      std::unique_lock<std::shared_mutex> write_lock(m_manager->m_mutex);
       if (m_cb == nullptr)
       {
          return false;

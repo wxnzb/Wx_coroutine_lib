@@ -43,7 +43,7 @@ class TimeManager{
    //取出所有时间的回调函数
    void listExpiredCb(std::vector<std::function<void()>>&cbs);
    //当有一个最早的timer加入堆中，调用它
-   void onTimeInsertedAtFront(){};
+   virtual void onTimerInsertedAtFront(){};
    //拿到堆中最近的超时时间
    uint64_t geteralistTime();
    protected:
