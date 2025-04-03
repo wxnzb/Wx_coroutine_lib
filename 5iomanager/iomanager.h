@@ -24,7 +24,7 @@ namespace sylar
             int fd = 0;
             EventContext read;
             EventContext write;
-            Event event = NONE;
+            Event events = NONE;
             EventContext &getEventContext(Event event);
             // 清空事件
             void resetEventContext(EventContext &ctx); // 不用Event event
@@ -33,7 +33,7 @@ namespace sylar
         };
 
     public:
-        IOManager(size_t threads, const std::string name = "IOManager");
+        IOManager(size_t threads=1, bool user_caller=true,const std::string& name = "IOManager");
         ~IOManager();
         void addEvent(int fd, Event event, std::function<void()> cb);
         void delEvent(int fd, Event event);
@@ -49,9 +49,12 @@ namespace sylar
         void idle() override;
         //这个是timer.h里面的
         void onTimerInsertedAtFront() override;
+        //设置文件描述符多少
+        void contextSize(size_t size);
     private:
         int m_epollfd;
         int m_tickleFds[2];
+        std::vector<FdContext *> m_fdContexts;
     };
 
 }
