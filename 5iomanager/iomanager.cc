@@ -70,4 +70,45 @@ namespace sylar
         }
         resetEventContext(ctx);
     }
+    void IOManager::addEvent(int fd, Event event, std::function<void()> cb){
+        FdContext* fd_ctx=nullptr;
+        if(fd>=int(m_fdContexts.size())){
+            fd_ctx=m_fdContexts[fd];
+        }else{
+            contextSize(1.5*fd);
+            fd_ctx=m_fdContexts[fd];
+        }
+        if(fd_ctx->events&event){
+            return;
+        }
+        int op=fd_ctx->events?EPOLL_CTL_MOD:EPOLL_CTL_ADD;
+        epoll_event  ev;
+        ev.events=EPOLLET|event|fd_ctx->events;
+        ev.data.ptr=fd_ctx;
+        epoll_ctl(m_epollfd,op,fd,&ev);
+        m_pendingEventCount++;
+        fd_ctx->events=Event(fd_ctx->events|event);
+        FdContext::EventContext& ctx=fd_ctx->getEventContext(event);
+        ctx.scheduler=Scheduler::GetThis();
+        if(cb){
+            ctx.cb.swap(cb);
+        }else{
+            ctx.fiber=Fiber::GetThis();
+        }
+    }
+    void IOManager::delEvent(int fd,Event event){
+        FdContext* fd_ctx=nullptr;
+        if(fd>=int(m_fdContexts.size())){
+            fd_ctx=m_fdContexts[fd];
+        }else{
+            return;
+        }
+        int op=(fd_ctx->events&~event)?EPOLL_CTL_MOD:EPOLL_CTL_DEL;
+        epoll_event ev;
+        ev.events=EPOLLET|(fd_ctx->events&~event);
+        ev.data.ptr=fd_ctx;
+        epoll_ctl(m_epollfd,op,fd,&ev);
+        m_pendingEventCount--;
+        
+    }
 }

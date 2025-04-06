@@ -55,6 +55,7 @@ namespace sylar
         int m_epollfd;
         int m_tickleFds[2];
         std::vector<FdContext *> m_fdContexts;
+        int m_pendingEventCount=0;
     };
 
 }
