@@ -39,5 +39,19 @@ IOManager* IOManager::GetThis(){
     int rt = epoll_ctl(m_epfd, op, fd, &epevent);这里为什么是   epevent.events   = 0;，不应该是fd的所有事件吗，这样才可以删
 - 因为 EPOLL_CTL_DEL 根本不关心 events 字段，删除的不是事件而是整个fd
 - 那是不是+和-都是关于fd的，与事件无关，要是想修改一个fd里面的事件，就要用修改
+## 7
+- 那就是epoll_wait的时候，他等待很多，其中就包含m_tickleFds[0],要想唤醒epoll就需要在m_tickleFds[1]里面写入对吗
+- epoll_wait(m_epfd, events.get(), MAX_EVENTS, timeout);
+- 这个调用会阻塞，直到：
+- 有被监听的 fd 变成就绪状态（比如可读/可写）；
+- 或者超时；
+- 或者被一个“tickle”事件唤醒。
+- 其中被监听的 fd 列表中，就特意加了 m_tickleFds[0] —— 这是 tickle 的 唤醒管道读端。
+- ## 8
+- std::atomic<size_t> m_pendingEventCount={0};
+        //int m_pendingEventCount=0;
+- 为什么用上面这个，不用下面这个
+
+
 
 

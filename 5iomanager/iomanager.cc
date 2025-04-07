@@ -2,6 +2,8 @@
 #include <sys/epoll.h>
 #include <unistd.h> //pipe
 #include <fcntl.h>
+#include<iostream>
+static bool debug=true;
 namespace sylar
 {
     IOManager::IOManager(size_t threads, bool user_caller, const std::string &name) : Scheduler(threads, user_caller, name), TimeManager()
@@ -31,6 +33,7 @@ namespace sylar
     }
     IOManager::~IOManager()
     {
+        stop();
         close(m_epollfd);
         close(m_tickleFds[0]);
         close(m_tickleFds[1]);
@@ -48,6 +51,7 @@ namespace sylar
         case WRITE:
             return write;
         }
+        throw std::invalid_argument("Unsupported event type");
     }
     void IOManager::FdContext::resetEventContext(IOManager::FdContext::EventContext &ctx)
     {
@@ -69,12 +73,13 @@ namespace sylar
             ctx.scheduler->scheduleLock(ctx.cb);
         }
         resetEventContext(ctx);
+        return;
     }
     void IOManager::addEvent(int fd, Event event, std::function<void()> cb)
     {
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd >= int(m_fdContexts.size()))
+        if (fd >int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
@@ -113,14 +118,14 @@ namespace sylar
     {
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd >= int(m_fdContexts.size()))
+        if (fd > int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
         }
         else
         {
-            read_lcok.unlock();
+            read_lock.unlock();
             return;
         }
         std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
@@ -138,14 +143,14 @@ namespace sylar
     {
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd >= int(m_fdContexts.size()))
+        if (fd > int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
         }
         else
         {
-            read_lcok.unlock();
+            read_lock.unlock();
             return;
         }
         std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
@@ -162,14 +167,14 @@ namespace sylar
     {
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd >= int(m_fdContexts.size()))
+        if (fd >int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
         }
         else
         {
-            read_lcok.unlock();
+            read_lock.unlock();
             return;
         }
         if (fd_ctx->events == NONE)
@@ -198,15 +203,25 @@ namespace sylar
     {
         return dynamic_cast<IOManager *>(Scheduler::GetThis());
     }
+    void IOManager::tickle()
+    {
+        if (!hasIdleThreads())
+        {
+            return;
+        }
+        write(m_tickleFds[0], "T", 1);
+    }
     void IOManager::idle()
     {
         uint64_t MAX_EVENTS = 5000;
-        std::uinque_ptr<epoll_event[]> events(new epoll_event[MAX_EVENTS]);
+        std::unique_ptr<epoll_event[]> events(new epoll_event[MAX_EVENTS]);
         while (true)
         {
+            if(debug) std::cout<<"IOManager::idle(),run in thread: "<<Thread::GetThreadId()<<std::endl;
             if (stopping())
             {
-                return;
+                if(debug)std::cout<<"name = "<<getName()<<" idle exits in thred: "<<Thread::GetThreadId()<<std::endl;
+                break;
             }
             int n;
             while (true)
@@ -226,21 +241,24 @@ namespace sylar
             cbs.clear();
             for (int i = 0; i < n; i++)
             {
-                epoll_event & ev=events[i];
-                FdContext *fd_ctx=(FdContext*)ev.data.ptr;
-                if(ev.events&(EPOLLERR|EPOLLHUP)){
-                    ev.events=ev.events&(EPOLLIN&EPOLLOUT);
+                epoll_event &ev = events[i];
+                FdContext *fd_ctx = (FdContext *)ev.data.ptr;
+                if (ev.events & (EPOLLERR | EPOLLHUP))
+                {
+                    ev.events = ev.events & (EPOLLIN & EPOLLOUT);
                 }
-                int event=NONE;
-                if(ev.events&EPOLLIN){
-                    event|=READ;
+                int event = NONE;
+                if (ev.events & EPOLLIN)
+                {
+                    event |= READ;
                 }
-                if(ev.events&EPOLLOUT){
-                    event|=WRITE;
+                if (ev.events & EPOLLOUT)
+                {
+                    event |= WRITE;
                 }
-                std::lock_guard<std::mutex>lock(fd_ctx->m_mutex);
-                int op=(ev.events&~event)?EPOLL_CTL_MOD:EPOLL_CTL_DEL;
-                ev.events=EPOLLET|(ev.events*event);
+                std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+                int op = (ev.events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+                ev.events = EPOLLET | (ev.events * event);
                 epoll_ctl(m_epollfd, op, fd_ctx->fd, &ev);
                 if (event & READ)
                 {
@@ -256,3 +274,12 @@ namespace sylar
             Fiber::GetThis()->yeid();
         }
     }
+    bool IOManager::stopping()
+    {
+        uint64_t timeout = geteralistTime();
+        return Scheduler::stopping() && timeout == ~0ull && m_pendingEventCount == 0;
+    }
+    void IOManager::onTimerInsertedAtFront(){
+        tickle();
+    }
+}

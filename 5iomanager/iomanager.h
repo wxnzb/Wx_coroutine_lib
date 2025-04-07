@@ -1,5 +1,8 @@
+#ifndef _SYLAR_IOMANAGER_H_
+#define _SYLAR_IOMANAGER_H_
 #include "schedule.h"
 #include "timer.h"
+#include<atomic>
 namespace sylar
 {
     class IOManager : public Scheduler,public TimeManager
@@ -36,11 +39,11 @@ namespace sylar
     public:
         IOManager(size_t threads=1, bool user_caller=true,const std::string& name = "IOManager");
         ~IOManager();
-        void addEvent(int fd, Event event, std::function<void()> cb);
+        void addEvent(int fd, Event event, std::function<void()> cb=nullptr);
         void delEvent(int fd, Event event);
         void cancelEvent(int fd, Event event);
         void cancelAll(int fd);
-        IOManager* GetThis();
+        static IOManager* GetThis();
 
     protected:
        //这是schedule.h里面的
@@ -57,8 +60,10 @@ namespace sylar
         int m_epollfd;
         int m_tickleFds[2];
         std::vector<FdContext *> m_fdContexts;
-        int m_pendingEventCount=0;
+        std::atomic<size_t> m_pendingEventCount={0};
+        //int m_pendingEventCount=0;
         std::shared_mutex m_mutex;
     };
 
 }
+#endif

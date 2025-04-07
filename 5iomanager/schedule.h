@@ -11,7 +11,7 @@ class Scheduler{
         ~Scheduler();
         const std::string& getName(){return m_name;};
     public:
-    Scheduler* GetThis();
+    static Scheduler* GetThis();
     void SetThis();
     void start();
     void stop();
@@ -33,11 +33,12 @@ class Scheduler{
             tickle();
           }
     }
-    void tickle();
+    virtual void tickle();
     //是否可以关闭
-    bool stopping();
+    virtual bool stopping();
     //空闲携程函数
-    void idle();
+    virtual void idle();
+    bool hasIdleThreads(){return m_idleThreadCount>0;}
     public:
     struct ScheduleTask{
         std::shared_ptr<Fiber> fiber;
