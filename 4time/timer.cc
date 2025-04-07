@@ -43,11 +43,13 @@ bool Timer::refresh()
    // 先删除并重新设置并插入
    m_next = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_ms);
    m_manager->m_timers.insert(shared_from_this());
+   return true;
 }
 // 这个和上面那个不同，主要是是上面那个可定是往后的，但是下面这个可能在定时器最前面
 bool Timer::reset(uint64_t ms, bool from_now)
 {
-   if (m_ms == ms)
+   //这里要记得加上from_now
+   if (m_ms == ms&&!from_now)
    {
       return true;
    }
@@ -69,6 +71,7 @@ bool Timer::reset(uint64_t ms, bool from_now)
    m_next = start + std::chrono::milliseconds(m_ms);
    // m_manager->m_timers.insert(shared_from_this());
    m_manager->addTimer(shared_from_this());
+   return true;
 }
 TimeManager::TimeManager()
 {
@@ -81,9 +84,9 @@ void TimeManager::addTimer(std::shared_ptr<Timer> timer)
 {
    bool at_front = false;
    {
-      std::unique_lock<std::shared_mutex> write_lock(m_manager->mutex);
+      std::unique_lock<std::shared_mutex> write_lock(m_mutex);
       auto it = m_timers.insert(timer).first;
-      at_front = (it == m_manager->m_timers.begin()) && !m_tickle;
+      at_front = (it == m_timers.begin()) && !m_tickle;
       if (at_front)
       {
          m_tickle = true;
@@ -115,23 +118,23 @@ std::shared_ptr<Timer> TimeManager::addConditionTimer(uint64_t ms, std::function
 }
 bool TimeManager::hasTimer()
 {
-   std::unique_lock<std::shared_mutex> write_lock(m_manager->mutex);
+   std::unique_lock<std::shared_mutex> write_lock(m_mutex);
    return !m_timers.empty();
 }
 void TimeManager::listExpiredCb(std::vector<std::function<void()>> &cbs)
 {
    auto now = std::chrono::steady_clock::now();
-   bool rollover = detectClockRollover();
    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+   bool rollover = detectClockRollover();
    while ((!m_timers.empty() && rollover) || ((!m_timers.empty() && (*m_timers.begin())->m_next < now)))
    {
-      auto timer = *m_timers.begin();
+      std::shared_ptr<Timer> timer = *m_timers.begin();
       m_timers.erase(m_timers.begin());
       if (timer->m_cb)
       {
          cbs.push_back(timer->m_cb);
       }
-      if (recurring)
+      if (timer->m_recurring)
       {
          // auto now=std::chrono::steady_clock::now();直接用上面那个就行吗，不会存在时差吗
          timer->m_next = now + std::chrono::milliseconds(timer->m_ms);
@@ -167,7 +170,7 @@ uint64_t TimeManager::geteralistTime()
    }
    auto time = (*m_timers.begin())->m_next;
    auto now = std::chrono::steady_clock::now();
-   if (time < now)
+   if (time <= now)
    {
       return 0;
    }
