@@ -25,6 +25,7 @@ namespace sylar
             EventContext read;
             EventContext write;
             Event events = NONE;
+            std::mutex m_mutex;
             EventContext &getEventContext(Event event);
             // 清空事件
             void resetEventContext(EventContext &ctx); // 不用Event event
@@ -39,6 +40,7 @@ namespace sylar
         void delEvent(int fd, Event event);
         void cancelEvent(int fd, Event event);
         void cancelAll(int fd);
+        IOManager* GetThis();
 
     protected:
        //这是schedule.h里面的
@@ -56,6 +58,7 @@ namespace sylar
         int m_tickleFds[2];
         std::vector<FdContext *> m_fdContexts;
         int m_pendingEventCount=0;
+        std::shared_mutex m_mutex;
     };
 
 }

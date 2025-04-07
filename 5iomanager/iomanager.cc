@@ -70,45 +70,189 @@ namespace sylar
         }
         resetEventContext(ctx);
     }
-    void IOManager::addEvent(int fd, Event event, std::function<void()> cb){
-        FdContext* fd_ctx=nullptr;
-        if(fd>=int(m_fdContexts.size())){
-            fd_ctx=m_fdContexts[fd];
-        }else{
-            contextSize(1.5*fd);
-            fd_ctx=m_fdContexts[fd];
+    void IOManager::addEvent(int fd, Event event, std::function<void()> cb)
+    {
+        FdContext *fd_ctx = nullptr;
+        std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+        if (fd >= int(m_fdContexts.size()))
+        {
+            fd_ctx = m_fdContexts[fd];
+            read_lock.unlock();
         }
-        if(fd_ctx->events&event){
+        else
+        {
+            read_lock.unlock();
+            std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+            contextSize(1.5 * fd);
+            fd_ctx = m_fdContexts[fd];
+        }
+        std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+        if (fd_ctx->events & event)
+        {
             return;
         }
-        int op=fd_ctx->events?EPOLL_CTL_MOD:EPOLL_CTL_ADD;
-        epoll_event  ev;
-        ev.events=EPOLLET|event|fd_ctx->events;
-        ev.data.ptr=fd_ctx;
-        epoll_ctl(m_epollfd,op,fd,&ev);
-        m_pendingEventCount++;
-        fd_ctx->events=Event(fd_ctx->events|event);
-        FdContext::EventContext& ctx=fd_ctx->getEventContext(event);
-        ctx.scheduler=Scheduler::GetThis();
-        if(cb){
-            ctx.cb.swap(cb);
-        }else{
-            ctx.fiber=Fiber::GetThis();
-        }
-    }
-    void IOManager::delEvent(int fd,Event event){
-        FdContext* fd_ctx=nullptr;
-        if(fd>=int(m_fdContexts.size())){
-            fd_ctx=m_fdContexts[fd];
-        }else{
-            return;
-        }
-        int op=(fd_ctx->events&~event)?EPOLL_CTL_MOD:EPOLL_CTL_DEL;
+        int op = fd_ctx->events ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
         epoll_event ev;
-        ev.events=EPOLLET|(fd_ctx->events&~event);
-        ev.data.ptr=fd_ctx;
-        epoll_ctl(m_epollfd,op,fd,&ev);
-        m_pendingEventCount--;
-        
+        ev.events = EPOLLET | event | fd_ctx->events;
+        ev.data.ptr = fd_ctx;
+        epoll_ctl(m_epollfd, op, fd, &ev);
+        m_pendingEventCount++;
+        fd_ctx->events = Event(fd_ctx->events | event);
+        FdContext::EventContext &ctx = fd_ctx->getEventContext(event);
+        ctx.scheduler = Scheduler::GetThis();
+        if (cb)
+        {
+            ctx.cb.swap(cb);
+        }
+        else
+        {
+            ctx.fiber = Fiber::GetThis();
+        }
     }
-}
+    void IOManager::delEvent(int fd, Event event)
+    {
+        FdContext *fd_ctx = nullptr;
+        std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+        if (fd >= int(m_fdContexts.size()))
+        {
+            fd_ctx = m_fdContexts[fd];
+            read_lock.unlock();
+        }
+        else
+        {
+            read_lcok.unlock();
+            return;
+        }
+        std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+        int op = (fd_ctx->events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+        epoll_event ev;
+        ev.events = EPOLLET | (fd_ctx->events & ~event);
+        ev.data.ptr = fd_ctx;
+        epoll_ctl(m_epollfd, op, fd, &ev);
+        m_pendingEventCount--;
+        fd_ctx->events = Event(fd_ctx->events & ~event);
+        FdContext::EventContext &ctx = fd_ctx->getEventContext(event);
+        fd_ctx->resetEventContext(ctx);
+    }
+    void IOManager::cancelEvent(int fd, Event event)
+    {
+        FdContext *fd_ctx = nullptr;
+        std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+        if (fd >= int(m_fdContexts.size()))
+        {
+            fd_ctx = m_fdContexts[fd];
+            read_lock.unlock();
+        }
+        else
+        {
+            read_lcok.unlock();
+            return;
+        }
+        std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+        int op = (fd_ctx->events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+        epoll_event ev;
+        ev.events = EPOLLET | (fd_ctx->events & ~event);
+        ev.data.ptr = fd_ctx;
+        epoll_ctl(m_epollfd, op, fd, &ev);
+        m_pendingEventCount--;
+        fd_ctx->triggerEvent(event);
+        return;
+    }
+    void IOManager::cancelAll(int fd)
+    {
+        FdContext *fd_ctx = nullptr;
+        std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+        if (fd >= int(m_fdContexts.size()))
+        {
+            fd_ctx = m_fdContexts[fd];
+            read_lock.unlock();
+        }
+        else
+        {
+            read_lcok.unlock();
+            return;
+        }
+        if (fd_ctx->events == NONE)
+        {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+        int op = EPOLL_CTL_DEL;
+        epoll_event ev;
+        ev.events = 0;
+        ev.data.ptr = fd_ctx;
+        epoll_ctl(m_epollfd, op, fd, &ev);
+        if (fd_ctx->events & READ)
+        {
+            fd_ctx->triggerEvent(READ);
+            m_pendingEventCount--;
+        }
+        if (fd_ctx->events & WRITE)
+        {
+            fd_ctx->triggerEvent(WRITE);
+            m_pendingEventCount--;
+        }
+        return;
+    }
+    IOManager *IOManager::GetThis()
+    {
+        return dynamic_cast<IOManager *>(Scheduler::GetThis());
+    }
+    void IOManager::idle()
+    {
+        uint64_t MAX_EVENTS = 5000;
+        std::uinque_ptr<epoll_event[]> events(new epoll_event[MAX_EVENTS]);
+        while (true)
+        {
+            if (stopping())
+            {
+                return;
+            }
+            int n;
+            while (true)
+            {
+                uint64_t MAX_TIMEOUT = 5000;
+                uint64_t timeout = geteralistTime();
+                uint64_t min = std::min(timeout, MAX_TIMEOUT);
+                n = epoll_wait(m_epollfd, events.get(), MAX_EVENTS, min);
+            }
+            // 将超时任务加入队列
+            std::vector<std::function<void()>> cbs;
+            listExpiredCb(cbs);
+            for (auto &cb : cbs)
+            {
+                scheduleLock(cb);
+            }
+            cbs.clear();
+            for (int i = 0; i < n; i++)
+            {
+                epoll_event & ev=events[i];
+                FdContext *fd_ctx=(FdContext*)ev.data.ptr;
+                if(ev.events&(EPOLLERR|EPOLLHUP)){
+                    ev.events=ev.events&(EPOLLIN&EPOLLOUT);
+                }
+                int event=NONE;
+                if(ev.events&EPOLLIN){
+                    event|=READ;
+                }
+                if(ev.events&EPOLLOUT){
+                    event|=WRITE;
+                }
+                std::lock_guard<std::mutex>lock(fd_ctx->m_mutex);
+                int op=(ev.events&~event)?EPOLL_CTL_MOD:EPOLL_CTL_DEL;
+                ev.events=EPOLLET|(ev.events*event);
+                epoll_ctl(m_epollfd, op, fd_ctx->fd, &ev);
+                if (event & READ)
+                {
+                    fd_ctx->triggerEvent(READ);
+                    m_pendingEventCount--;
+                }
+                if (event & WRITE)
+                {
+                    fd_ctx->triggerEvent(WRITE);
+                    m_pendingEventCount--;
+                }
+            }
+            Fiber::GetThis()->yeid();
+        }
+    }
