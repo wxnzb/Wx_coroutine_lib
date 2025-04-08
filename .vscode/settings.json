@@ -61,6 +61,7 @@
         "semaphore": "cpp",
         "iostream": "cpp",
         "cinttypes": "cpp",
-        "shared_mutex": "cpp"
+        "shared_mutex": "cpp",
+        "set": "cpp"
     }
 }
