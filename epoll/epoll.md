@@ -260,4 +260,3 @@ connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
 
 ## 4
 - 为啥events[i].data.fd==listen_fd就代表有新的客户端连接
-  
