@@ -260,3 +260,22 @@ connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
 
 ## 4
 - 为啥events[i].data.fd==listen_fd就代表有新的客户端连接
+## 5
+- 为什么在终端运行curl http://127.0.0.1:8888这个就可以成功输出一，这里面的流程是怎样的
+- [你输入 curl] ─┐
+               ▼
+        curl 创建 socket
+               ▼
+        curl 连接服务器 127.0.0.1:8888
+               ▼
+   你的 epoll 服务器监听并 accept()
+               ▼
+      curl 发送 HTTP 请求 GET / ...
+               ▼
+      你的服务器 read() 收到请求
+               ▼
+    你的服务器 write() 返回 HTTP 响应 "1"
+               ▼
+             curl 接收显示 "1"
+               ▼
+        服务器 close()，连接结束
