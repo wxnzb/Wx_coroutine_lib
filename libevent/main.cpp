@@ -10,6 +10,8 @@ int main(){
     if((listen_fd = socket(AF_INET,SOCK_STREAM,0))==-1){
         return -1;
     }
+    //将listen_fd设置成非阻塞
+    evutil_make_socket_nobilocking(listen_fd);
      // 解决 "address already in use" 错误
      int opt=1;
      setsockopt(listen_fd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
@@ -33,4 +35,49 @@ int main(){
      struct event * listener_event;
      listener_event=event_new(base,listen_fd,EV_READ|EV_PERSIST,accept_cb,base)
 }
-void accept_cb(ev)
+void accept_cb(evutil_socket_t listen_fd,short event,void *arg){
+    struct event_base *base=(struct event_base*)arg;
+    // struct sockaddr_in client_addr;
+    // socklen_t client_len=sizeof(client_addr);
+    // int conn_fd=accept(listen_fd,(struct sockaddr*)&client_addr,&client_len);
+    struct sockaddr_storage client_addr;
+    socklen_t client_len=sizeof(client_addr);
+    int conn_fd=accept(listen_fd,(struct sockaddr*)&client_addr,&client_len);
+    if(conn_fd==-1){
+        return -1;
+    }
+    else{
+        
+        //创建一个新的事件的结构体
+        struct event *ev=event_new(NULL,-1,0,NULL,NULL);
+        //将新的事件添加到libevent库中
+        event_assign(ev,base,conn_fd,EV_READ|EV_PERSIST,read_cb,(void*)ev);
+        event_add(ev,NULL);
+    }
+}
+void read_cb(evutil_socket_t conn_fd,short event,void *arg){
+    struct event *ev=(struct event*)arg;
+    char buf[1024];
+            //处理数据
+            int n=read(events[i].data.fd,buf,sizeof(buf)-1);
+            if(n<=0){
+                //close(events[i].data.fd);
+                event_free(ev);
+                continue;
+            }else{
+            buf[len]='\0';
+            printf("接收到消息:%s\n",buf);
+                const char* buffer="HTTP/1.1 200 OK\r\n"
+                                           "Content-Type: text/plain\r\n"
+                                           "Content-Length: 1\r\n"
+                                           "Connection: keep-alive\r\n"
+                                           "\r\n"
+                                           "1";
+                //这里不能用sizeof(buffer)，他是指针类型，64位机子上是8
+                // write(events[i].data.fd,buffer,strlen(buffer));
+                // epoll_ctl(epoll_fd,EPOLL_CTL_DEL,events[i].data.fd,NULL);
+                // close(events[i].data.fd);
+                send(conn_fd,buffer,strlen(buffer),0);
+                close(conn_fd);
+                event_free(ev);
+}
