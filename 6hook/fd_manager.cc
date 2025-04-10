@@ -26,6 +26,50 @@ bool FdCtx::init(){
     }else{
         m_sysNonblock=false;
     }
-   }
+   }else{
+    m_sysNonblock=false;
+}
    return m_isInit;
+}
+void FdCtx::setTimeout(int type,uint64_t v){
+    if(type==SO_RECVTIMEO){
+        m_recvTimeout=v;
+    }else{
+        m_sendTimeout=v;
+    }
+}
+uint64_t FdCtx::getTimeout(int type){
+    if(type==SO_RECVTIMEO){
+        return m_recvTimeout;
+    }
+    return m_sendTimeout;
+}
+FdManager::FdManager(){
+    m_datas.resize(64);
+}
+std::shared_ptr<FdCtx> FdManager::add(int fd,bool auto_create){
+    if(fd==-1){
+        return nullptr;
+    }
+    std::shared_lock<std::shared_mutex>read_lock(m_mutex);
+    if(fd>=m_datas.size()){
+        if(auto_create==false){
+            return nullptr;
+        }
+        else{
+            read_lock.unlock();
+            std::unique_lock<std::shared_lock>write_lock(m_mutex);
+            m_datas.resize(fd*1.5);
+            m_datas[fd]=std::shared_ptr<FdCtx>(new FdCtx(fd));
+            return m_datas[fd];
+        }
+    }
+    return m_datas[fd];
+}
+void FdManager::del(int fd){
+    std::shared_lock<std::shared_mutex>write_lock(m_mutex);
+    if(fd>=m_datas.size()){
+        return;
+    }
+    m_datas[fd]=nullptr;
 }
