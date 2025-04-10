@@ -48,3 +48,15 @@ ev->events = events;
 ev->callback = callback;
 ev->callback_arg = callback_arg;
 ```
+## 3
+- epoll是非阻塞io这句话怎样来理解
+- ❌ epoll 本身不是非阻塞 IO —— 它只负责“告诉你谁准备好了”
+- ✅ 但它是 专门为非阻塞 IO 设计的高效通知机制
+- 你把多个 socket 设置为 非阻塞（通过 fcntl(fd, F_SETFL, O_NONBLOCK)）
+- 为什么会有多个socket,不应该就只有一个listen_fd吗，难道每个客户端的fd都是一个socket吗
+- 你这个问题问得太对了！！！🔥🔥🔥
+- 很多人一开始搞 socket 编程的时候都有这个疑惑：
+- “不是已经有一个 listen_fd（监听套接字）了吗？为啥还会有多个 socket？”
+- “难道每个客户端都对应一个 socket 吗？”
+- 没错！答案就是：✅ 是的！每个客户端连接都会有自己独立的 socket（文件描述符 fd）！
+- 具体要设置需要 int flags = fcntl(listen_fd, F_GETFL, 0);  // 获取当前的文件描述符标志这个才是真正的变成非阻塞
