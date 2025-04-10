@@ -3,12 +3,14 @@
 #include<cstring>
 #include<sys/epoll.h>
 #include<unistd.h>
+#include<fcntl.h>
 int main(){
     int listen_fd;
     //创建套子节
     if((listen_fd = socket(AF_INET,SOCK_STREAM,0))==-1){
         return -1;
     }
+    int flags = fcntl(listen_fd, F_GETFL, 0);  // 获取当前的文件描述符标志
      // 解决 "address already in use" 错误
      int opt=1;
      setsockopt(listen_fd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
@@ -47,6 +49,8 @@ int main(){
             if(conn_fd==-1){
                 return -1;
             }
+             // 将 conn_fd 设置为非阻塞
+             int flags = fcntl(conn_fd, F_GETFL, 0);  // 获取当前的文件描述符标志
             event.events=EPOLLIN;
             event.data.fd=conn_fd;
             if(epoll_ctl(epoll_fd,EPOLL_CTL_ADD,conn_fd,&event)==-1){
