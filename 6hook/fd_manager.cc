@@ -1,6 +1,13 @@
 #include "fd_manager.h"
 #include<sys/stat.h>
 #include<fcntl.h>
+#include<mutex>
+namespace sylar{
+    template class Singleton<FdManager>;
+    template <typename T>
+    T* Singleton<T>::instance=nullptr;
+    template <typename T>
+    std::mutex Singleton<T>::m_mutex;
 FdCtx::FdCtx(int fd){
     m_fd=fd;
     init();
@@ -72,4 +79,5 @@ void FdManager::del(int fd){
         return;
     }
     m_datas[fd]=nullptr;
+}
 }

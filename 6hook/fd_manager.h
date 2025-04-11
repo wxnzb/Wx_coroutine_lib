@@ -1,6 +1,7 @@
 #include <cstdint>
 #include<memory>
 #include<vector>
+namespace sylar{
 class FdCtx
 {
 public:
@@ -67,5 +68,6 @@ public:
    Singleton(){};
 private:
     static T *instance;
-    std::mutex m_mutex;
+    static std::mutex m_mutex;
 };
+}
