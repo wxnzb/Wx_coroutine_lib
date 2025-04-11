@@ -1,5 +1,11 @@
 #include "hook.h"
 #include<dlfcn.h>
+#include"fiber.h"
+#include"iomanager.h"
+#include"iomanager.h"
+#include <iostream>   // 用于 std::cerr 和 std::endl
+#include <cstring>    // 用于 strerror()
+#include <cerrno>     // 用于 errno 宏
 #define HOOK_FUN(XX) \
     XX(sleep)        \
     XX(usleep)       \
@@ -83,26 +89,53 @@ namespace sylar
         static struct HookIniter s_hookiniter;
     };
 }
-unsigned int sleep(unsigned int seconds){
+unsigned int sleep(unsigned int seconds){//秒
     if(!sylar::is_hook_enable()){
         return sleep_f(seconds);
     }
+    std::shared_ptr<sylar::Fiber> fiber=sylar::Fiber::GetThis();
+    sylar::IOManager* iom=sylar::IOManager::GetThis();
+    iom->addTimer(seconds*1000,[fiber,iom](){//毫秒
+        iom->scheduleLock(fiber,-1);
+    });
+    fiber->yeid();
+	return 0;
 }
-int usleep(useconds_t usec){
+int usleep(useconds_t usec){//微妙
     if(!sylar::is_hook_enable()){
         usleep_f(usec);
     }
+    std::shared_ptr<sylar::Fiber> fiber=sylar::Fiber::GetThis();
+    sylar::IOManager* iom=sylar::IOManager::GetThis();
+    sylar::IOManager* iom=sylar::IOManager::GetThis();
+    iom->addTimer(usec/1000,[fiber,iom](){//毫秒
+        iom->scheduleLock(fiber,-1);
+    });
+    fiber->yeid();
 }
 int nanosleep(const struct timespec *req, struct timespec *rem){
     if(!sylar::is_hook_enable()){
         return nanosleep_f(req,rem);
     }
+    std::shared_ptr<sylar::Fiber> fiber=sylar::Fiber::GetThis();
+    sylar::IOManager* iom=sylar::IOManager::GetThis();
+    sylar::IOManager* iom=sylar::IOManager::GetThis();
+    auto ms=req->tv_sec*1000+req->tv_nsec/1000000;
+    iom->addTimer(ms,[fiber,iom](){//毫秒
+        iom->scheduleLock(fiber,-1);
+    });
+    fiber->yeid();
 }
 
 // 套接字函数（socket 网络相关，sys/socket.h）
 int socket(int domain, int type, int protocol){
     if(!sylar::is_hook_enable()){
         return socket_f(domain,type,protocol);
+    }
+    int fd=socket_f(domain,type,protocol);
+    if(fd==-1){
+        std::cerr<<"socket error"<<strerror(errno)<<std::endl;
+        return -1;
     }
 }
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen){
