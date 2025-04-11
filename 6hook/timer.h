@@ -110,8 +110,8 @@ namespace sylar
         TimeManager();
         //这里为什么要用virtual
         virtual ~TimeManager();
-        std::shared_ptr<Timer> addTimer(uint64_t ms, std::function<void()> cb, bool recurring);
-        std::shared_ptr<Timer> addConditionTimer(uint64_t ms, std::function<void()> cb, bool curring, std::weak_ptr<void> weakcond);
+        std::shared_ptr<Timer> addTimer(uint64_t ms, std::function<void()> cb, bool recurring=false);
+        std::shared_ptr<Timer> addConditionTimer(uint64_t ms, std::function<void()> cb, std::weak_ptr<void> weakcond, bool recurring=false);
         // 堆中是否还有timer
         bool hasTimer();
         // 取出所有时间的回调函数

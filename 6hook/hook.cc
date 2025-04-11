@@ -6,6 +6,7 @@
 #include <iostream>   // 用于 std::cerr 和 std::endl
 #include <cstring>    // 用于 strerror()
 #include <cerrno>     // 用于 errno 宏
+#include "fd_manager.h"
 #define HOOK_FUN(XX) \
     XX(sleep)        \
     XX(usleep)       \
@@ -119,7 +120,6 @@ int nanosleep(const struct timespec *req, struct timespec *rem){
     }
     std::shared_ptr<sylar::Fiber> fiber=sylar::Fiber::GetThis();
     sylar::IOManager* iom=sylar::IOManager::GetThis();
-    sylar::IOManager* iom=sylar::IOManager::GetThis();
     auto ms=req->tv_sec*1000+req->tv_nsec/1000000;
     iom->addTimer(ms,[fiber,iom](){//毫秒
         iom->scheduleLock(fiber,-1);
@@ -137,10 +137,72 @@ int socket(int domain, int type, int protocol){
         std::cerr<<"socket error"<<strerror(errno)<<std::endl;
         return -1;
     }
+    sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd,true);
+    return fd;
 }
+//是否取消定时器
+struct timer_info{
+    bool cancelled=0;
+};
+int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addrlen,uint64_t timeout){
+    if(!sylar::is_hook_enable()){
+        return connect_f(sockfd,addr,addrlen);
+    }
+    std::shared_ptr<sylar::FdCtx> fdctx=sylar::Singleton<sylar::FdManager>::GetInstance()->get(sockfd);
+    if(!fdctx){
+        return -1;
+    }
+    if(fdctx->isClose()){
+        errno=EBADF;//ebadf是什么
+        return -1;
+    }
+    if(!fdctx->isSocket()){//要是不是套子节也就没必要connect了
+        return connect_f(sockfd,addr,addrlen);//这里其实就返回错误了
+    }
+    if(fdctx->getUserNonblock()){//要是非阻塞的直接调用就行了，后面的是为了解决他没有设置成非阻塞，现在要解决他的阻塞问题
+        return connect_f(sockfd,addr,addrlen);
+    }
+    int n=connect_f(sockfd,addr,addrlen);
+    //连接成功
+    if(n==0){
+        return 0;
+    }
+    //连接失败，表明如果不是“正在连接中（EINPROGRESS）”，则返回错误
+    if(errno!=EINPROGRESS||n!=-1){
+        return n;
+    }
+    //那么下面这些就是connect在连接中
+    sylar::IOManager* iom=sylar::IOManager::GetThis();
+    std::shared_ptr<timer_info> tinfo(new timer_info);
+    std::weak_ptr<timer_info>wtinfo(tinfo);
+    //设置定时器
+    std::shared_ptr<sylar::Timer>  timer;
+    //表明设置了计时器
+    if(timeout!=(uint64_t)-1){
+        iom->addConditionTimer(timeout,[iom,wtinfo,sockfd](){
+         auto t=wtinfo.lock();
+         if(!t){
+            return;
+         }
+         t->cancelled=TIMEOUT;
+         iom->cancelEvent(sockfd,sylar::IOManager::WRITE);
+        },wtinfo);
+    }
+    //要是连接成功了
+    int rt=iom->addEvent(sockfd,sylar::IOManager::Event(event));
+    if(rt==0){
+        //现在已经连接并且在监听了
+        //让出携程
+        sylar::Fiber::GetThis()->yeid();
+        if(timer){
+            timer->cancel();
+        }
+    }
+}
+static uint64_t s_connect_timeout=-1;//表示不设置计时器
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen){
     if(!sylar::is_hook_enable()){  
-        return connect_f(sockfd,addr,addrlen);
+        return connect_with_timeout(sockfd,addr,addrlen,s_connect_timeout);
     }
 }
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen){

@@ -289,7 +289,7 @@ void OnTimer(std::weak_ptr<void> weakcond, std::function<void()> cb)
       cb();
    }
 }
-std::shared_ptr<Timer> TimeManager::addConditionTimer(uint64_t ms, std::function<void()> cb, bool recurring, std::weak_ptr<void> weakcond)
+std::shared_ptr<Timer> TimeManager::addConditionTimer(uint64_t ms, std::function<void()> cb,  std::weak_ptr<void> weakcond,bool recurring)
 {
    return addTimer(ms, std::bind(&OnTimer, weakcond, cb), recurring);
 }
