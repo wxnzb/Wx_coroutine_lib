@@ -144,6 +144,13 @@ int socket(int domain, int type, int protocol){
 struct timer_info{
     bool cancelled=0;
 };
+//这个函数还是比较难懂的
+//首先要是没有打开hook，就直接调用原函数，然后找这个要连接的服务器fd的上下文，判断他是否存在，是否关闭，
+//要是不是socket就直接调用原函数他会错误返回，用户自己设置了非阻塞就只调用原函数就行了，要是没设置，在获得fd的上下文的时候，也就是
+//bool FdCtx::init()这个里面他会自己设置成非阻塞，然后把sysNonblock设置成true
+//所以connect()` 在没连上目标服务器的时候，会立刻返回 `-1`，并设置 `errno = EINPROGRESS` —— 这就是**非阻塞 socket 正在连接中的正常表现**
+//Sylar 利用协程挂起 + 写事件监听 + 定时器，就能完美模拟出“阻塞 connect 并支持超时”的行为
+//上买就是他现在不是正在连接吗，为了让线程不等待，就先把他加入到事件中，然后让出线程，等他连接上，然后唤醒线程，然后判断是否超时，超时就返回错误，没超时就返回0
 int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addrlen,uint64_t timeout){
     if(!sylar::is_hook_enable()){
         return connect_f(sockfd,addr,addrlen);
@@ -189,15 +196,39 @@ int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addr
         },wtinfo);
     }
     //要是连接成功了
-    int rt=iom->addEvent(sockfd,sylar::IOManager::Event(event));
+    int rt=iom->addEvent(sockfd,sylar::IOManager::Event(sylar::IOManager::WRITE));
     if(rt==0){
         //现在已经连接并且在监听了
         //让出携程
         sylar::Fiber::GetThis()->yeid();
+        //被唤醒后，要是存在定时器，就删掉他
         if(timer){
             timer->cancel();
         }
+        if(tinfo->cancelled){
+            errno=tinfo->cancelled;
+            return -1;
+        }
     }
+    else{
+        //连接失败
+        if(timer){
+            timer->cancel();
+            std::cerr<<"connect addEvent"<<sockfd<<" error"<<std::endl;
+            return -1;
+        }
+    }
+    //非阻塞 connect 的标准收尾检查流程，用 getsockopt(..., SO_ERROR) 获取连接最终状态
+    int error=0;
+    socklen_t len=sizeof(error);
+    if(getsockopt(sockfd,SOL_SOCKET,SO_ERROR,&error,&len)==-1){
+        return -1;
+    }
+    if(error){
+        errno=error;
+        return -1;
+    }
+    return 0;
 }
 static uint64_t s_connect_timeout=-1;//表示不设置计时器
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen){

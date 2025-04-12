@@ -16,6 +16,7 @@ FdCtx::~FdCtx(){
 
 }
 bool FdCtx::init(){
+   //获取文件描述符的状态
    struct stat st;
    if(fstat(m_fd,&st)==-1){
     m_isInit=false;
@@ -24,10 +25,13 @@ bool FdCtx::init(){
     m_isInit=true;
     m_isSocket=S_ISSOCK(st.st_mode);
    }
+   //如果文件描述符是套接字
    if(m_isSocket){
     //看这个套子节是否是非阻塞的
     int flags=fcntl(m_fd,F_GETFL,0);
+    //如果文件描述符不是非阻塞的
     if(!(flags)&O_NONBLOCK){
+        //设置文件描述符为非阻塞
         fcntl(m_fd,F_SETFD,flags|O_NONBLOCK);
         m_sysNonblock=true;
     }else{
@@ -54,7 +58,7 @@ uint64_t FdCtx::getTimeout(int type){
 FdManager::FdManager(){
     m_datas.resize(64);
 }
-std::shared_ptr<FdCtx> FdManager::add(int fd,bool auto_create){
+std::shared_ptr<FdCtx> FdManager::get(int fd,bool auto_create){
     if(fd==-1){
         return nullptr;
     }

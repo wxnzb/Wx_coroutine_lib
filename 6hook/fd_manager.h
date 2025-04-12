@@ -33,7 +33,7 @@ private:
 class FdManager{
     public:
     FdManager();
-    std::shared_ptr<FdCtx> add(int fd,bool auto_create =false);
+    std::shared_ptr<FdCtx> get(int fd,bool auto_create =false);
     void del(int fd);
     private:
     std::shared_mutex m_mutex;
@@ -46,7 +46,7 @@ public:
      //禁止拷贝构造和赋值
      Singleton(const Singleton &)=delete;
      Singleton &operator=(const Singleton &)=delete;
-    static T *getInstanse()
+    static T *GetInstance()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (instance == nullptr)

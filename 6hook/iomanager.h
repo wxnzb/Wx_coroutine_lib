@@ -39,7 +39,7 @@ namespace sylar
     public:
         IOManager(size_t threads=1, bool user_caller=true,const std::string& name = "IOManager");
         ~IOManager();
-        void addEvent(int fd, Event event, std::function<void()> cb=nullptr);
+        bool addEvent(int fd, Event event, std::function<void()> cb=nullptr);
         void delEvent(int fd, Event event);
         void cancelEvent(int fd, Event event);
         void cancelAll(int fd);

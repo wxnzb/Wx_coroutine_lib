@@ -75,7 +75,7 @@ namespace sylar
         resetEventContext(ctx);
         return;
     }
-    void IOManager::addEvent(int fd, Event event, std::function<void()> cb)
+    bool IOManager::addEvent(int fd, Event event, std::function<void()> cb)
     {
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
@@ -94,7 +94,7 @@ namespace sylar
         std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
         if (fd_ctx->events & event)
         {
-            return;
+            return -1;
         }
         int op = fd_ctx->events ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
         epoll_event ev;
@@ -113,6 +113,7 @@ namespace sylar
         {
             ctx.fiber = Fiber::GetThis();
         }
+        return  0;
     }
     void IOManager::delEvent(int fd, Event event)
     {
