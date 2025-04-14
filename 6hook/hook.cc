@@ -15,7 +15,9 @@
     XX(connect)      \
     XX(accept)       \
     XX(read)         \
+    XX(readv)        \
     XX(write)        \
+    XX(writev)       \
     XX(recv)         \
     XX(recvfrom)     \
     XX(recvmsg)      \
@@ -261,8 +263,9 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
     if (!sylar::is_hook_enable())
     {
-        return connect_with_timeout(sockfd, addr, addrlen, s_connect_timeout);
+        return connect_f(sockfd, addr, addrlen);
     }
+    return connect_with_timeout(sockfd, addr, addrlen, s_connect_timeout);
 }
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 {
@@ -272,7 +275,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
     }
 }
 template <typename OriginFun, typename... Args>
-static size_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t event, int timeout_so, Args &&...args)
+static ssize_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t event, int timeout_so, Args &&...args)
 {
     // 1	判断是否启用 Hook，是否是 socket，是否非阻塞
     if (!sylar::is_hook_enable())
@@ -299,7 +302,7 @@ static size_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t e
     // 3	执行系统调用，如果是 EINTR 重试
 retry:
     ssize_t n = fun(fd, std::forward<Args>(args)...);
-    while (n == -1 && errno == EINIR)
+    while (n == -1 && errno == EINTR)
     {
         n = fun(fd, std::forward<Args>(args)...);
     }
@@ -307,7 +310,7 @@ retry:
     if (n == -1 && errno == EAGAIN)
     {
         sylar::IOManager *iom = sylar::IOManager::GetThis();
-        std::shared_ptr<Timer> timer;
+        std::shared_ptr<sylar::Timer> timer;
         // 5	设置超时定时器
         if (timeout != (uint64_t)-1)
         {
@@ -318,7 +321,7 @@ retry:
             if(!t||t->cancelled){
                 return;
             }
-            t->cancelled=TIMEOUT;
+            t->cancelled=ETIMEDOUT;
             iom->caneclEvent(fd,event); }, wtinfo);
         }
         int rt = iom->addEvent(fd, sylar::IOManager::Event(event));
@@ -334,115 +337,110 @@ retry:
         }
         else
         {
+            // 6	当前协程挂起等待 IO 事件或超时
             sylar::Fiber::GetThis()->yeid();
             if (timer)
             {
                 timer->cancel();
             }
-            if (tinfo->cancelled==TIMEOUT){
-                errno=tinfo->cancelled;
+            if (tinfo->cancelled == ETIMEDOUT)
+            {
+                errno = tinfo->cancelled;
                 return -1;
             }
+            // 7	IO 就绪恢复后继续调用，或者超时返回
             go to retry;
         }
-        // 6	当前协程挂起等待 IO 事件或超时
-        // 7	IO 就绪恢复后继续调用，或者超时返回
-    }
-    ssize_t send(int sockfd, const void *buf, size_t len, int flags)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return send_f(sockfd, buf, len, flags);
         }
-    }
+}
+ssize_t send(int sockfd, const void *buf, size_t len, int flags)
+{
+    return io_do(sockfd, send_f, "send", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags);
+}
 
-    ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return sendto_f(sockfd, buf, len, flags, dest_addr, addrlen);
-        }
-    }
-    ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return sendmsg_f(sockfd, msg, flags);
-        }
-    }
-    ssize_t recv(int sockfd, void *buf, size_t len, int flags)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return recv_f(sockfd, buf, len, flags);
-        }
-    }
-    ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return recvfrom_f(sockfd, buf, len, flags, src_addr, addrlen);
-        }
-    }
-    ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return recvmsg_f(sockfd, msg, flags);
-        }
-    }
+ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen)
+{
+    return io_do(sockfd, sendto_f, "sendto", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags);
+}
+ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags)
+{
+    return io_do(sockfd, sendmsg_f, "sendmsg", sylar::IOManager::READ,SO_SNDTIMEO, msg,flags);
+}
+ssize_t recv(int sockfd, void *buf, size_t len, int flags)
+{
+    return io_do(sockfd, recv_f, "recv", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags);
+}
+ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
+{
+    return io_do(sockfd, recvfrom_f, "recvfrom", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags,src_addr,addrlen);
+}
+ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags)
+{
+    return io_do(sockfd, recvmsg_f, "recvmsg", sylar::IOManager::READ,SO_SNDTIMEO, msg,flags);
+}
 
-    // 文件/套接字读写相关（unistd.h）
-    ssize_t read(int fd, void *buf, size_t count)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return read_f(fd, buf, count);
-        }
-    }
-    ssize_t write(int fd, const void *buf, size_t count)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return write_f(fd, buf, count);
-        }
-    }
+// 文件/套接字读写相关（unistd.h）
+ssize_t read(int fd, void *buf, size_t count)
+{
+    return io_do(fd, read_f, "read", sylar::IOManager::READ,SO_SNDTIMEO, buf,count);
+}
+ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
+{
+    return io_do(fd, readv_f, "readv", sylar::IOManager::READ,SO_SNDTIMEO, iov,iovcnt);
+}
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
+{
+    return io_do(fd, writev_f, "writev", sylar::IOManager::WRITE,SO_SNDTIMEO, iov,iovcnt);
+}
+ssize_t write(int fd, const void *buf, size_t count)
+{
+    return io_do(fd, write_f, "write", sylar::IOManager::WRITE,SO_SNDTIMEO, buf,count);
+}
 
-    // 关闭文件描述符（unistd.h）
-    int close(int fd)
+// 关闭文件描述符（unistd.h）
+int close(int fd)
+{
+    if (!sylar::is_hook_enable())
     {
-        if (!sylar::is_hook_enable())
-        {
-            return close_f(fd);
-        }
+        return close_f(fd);
     }
+}
 
-    // 控制类函数
-    int fcntl(int fd, int cmd, ... /* arg */)
+// 控制类函数
+int fcntl(int fd, int cmd, ... /* arg */)
+{
+    if (!sylar::is_hook_enable())
     {
-        if (!sylar::is_hook_enable())
-        {
-            return fcntl_f(fd, cmd);
+        return fcntl_f(fd, cmd);
+    }
+}
+int ioctl(int fd, unsigned long request, ...)
+{
+    if (!sylar::is_hook_enable())
+    {
+        return ioctl_f(fd, request);
+    }
+}
+int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
+{
+        return getsockopt_f(sockfd, level, optname, optval, optlen);
+}
+int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen)
+{
+    if (!sylar::is_hook_enable())
+    {
+        return setsockopt_f(sockfd, level, optname, optval, optlen);
+    }
+    if(level==SOL_SOCKET){
+        //设置超时时间
+        if(optname==SO_SNDTIMEO||optname==SO_RCVTIMEO){
+        std::shared_ptr<sylar::FdCtx>fdctx=sylar::Singleton<sylar::FdManager>::GetInstance()->get(sockfd);
+        if(!fdctx){
+            return -1;
+        }
+        const struct timeval* tv=(const struct timeval*)optval;
+        fdctx->setTimeout(optname,tv->tv_sec*1000+tv->tv_usec/1000);
         }
     }
-    int ioctl(int fd, unsigned long request, ...)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return ioctl_f(fd, request);
-        }
-    }
-    int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return getsockopt_f(sockfd, level, optname, optval, optlen);
-        }
-    }
-    int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return setsockopt_f(sockfd, level, optname, optval, optlen);
-        }
-    }
+    return setsockopt_f(sockfd, level, optname, optval, optlen);
+}

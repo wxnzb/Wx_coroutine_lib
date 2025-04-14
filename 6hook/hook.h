@@ -44,8 +44,12 @@ extern "C"
     // 文件/套接字读写相关（unistd.h）
     typedef ssize_t (*read_fun)(int fd, void *buf, size_t count);
     read_fun read_f;
+    typedef ssize_t (*readv_fun)(int fd, const struct iovec *iov, int iovcnt);
+    readv_fun readv_f;
     typedef ssize_t (*write_fun)(int fd, const void *buf, size_t count);
     write_fun write_f;
+    typedef ssize_t (*writev_fun)(int fd, const struct iovec *iov, int iovcnt);
+    writev_fun writev_f;
 
     // 关闭文件描述符（unistd.h）
     typedef int (*close_fun)(int fd);
