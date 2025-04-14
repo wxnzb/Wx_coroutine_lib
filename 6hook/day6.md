@@ -36,5 +36,64 @@
 - 问题：但是他找到fdctx好像也没用阿，他有没赋值给谁
 - 确保这个 fd 对应的 FdCtx 被记录在 FdManager 中”，哪怕现在没用，后面用 read()、write()、close() 时就能查到了，如果已经有了，就直接返回，要是没有，就要创建
 ## 7
--  
+-  connect_with_timeout这个函数大概做的事情
+// 这个函数主要用于 hook 掉 connect 实现“阻塞 connect + 支持超时”的模拟逻辑。
+// 
+// 1. 如果没有启用 hook（t_hook_enable 为 false），那就直接调用系统原生 connect。
+// 
+// 2. 否则进入 hook 模拟逻辑：
+//    - 获取 fd 的上下文（FdCtx）
+//    - 判断 fd 是否有效、是否关闭、是否是 socket。如果不是 socket 或已关闭，就返回错误或直接走原始逻辑。
+//    - 如果用户手动设置了非阻塞（getUserNonblock()），也直接调用原始 connect，不做 hook。
+// 
+// 3. 如果用户没有设置非阻塞：
+//    - Sylar 框架会在 FdCtx::init() 中，把 socket 设置为系统层非阻塞（fcntl 加上 O_NONBLOCK），
+//    - 并将 m_sysNonblock 设置为 true，确保后续逻辑是基于非阻塞 socket 的行为。
+//
+// 4. 此时调用 connect()，如果连接未建立好，就会返回 -1，并设置 errno = EINPROGRESS。
+//    - 这是非阻塞 socket 正在连接中的标准表现，表示“连接还在进行中”。
+//
+// 5. 为了模拟“阻塞 connect”，Sylar 做了以下操作：
+//    - 将当前协程挂起（Fiber::yield），让出执行权（不阻塞线程）
+//    - 向 IOManager 注册一个写事件监听（fd 可写 = 连接成功）
+//    - 同时添加一个定时器，如果在 timeout_ms 毫秒内没有连接成功，就取消事件并设置 ETIMEDOUT。
+//
+// 6. 当 socket 可写时或超时事件触发，会唤醒当前协程：
+//    - 如果超时了，返回错误（errno = ETIMEDOUT）
+//    - 如果写事件唤醒，调用 getsockopt 检查是否真正连接成功（error == 0），是的话返回 0，否则设置 errno。
+//
+// ✅ 总结：
+//    虽然 socket 是非阻塞的，但 Sylar 利用协程挂起 + epoll 写事件监听 + 定时器，模拟出一个“支持超时的阻塞 connect”，
+//    用户感知上就是一个正常的阻塞 connect，底层却完全不阻塞线程，非常适合高并发协程调度。
+## 8
+- template<typename OriginFun,typename ... Args>
+- static size_t io_do(int fd,OriginFun fun,const char* hook_fun_name,uint32_t event,int timeout_so,Args && ... args){}
+- 什么用法
+- ✅ 意思：
+- 这是一段 函数模板定义，表示该函数适用于各种类型的参数：
+- OriginFun：是一个函数类型或函数指针，表示我们要“hook”（钩住）原始调用的函数，比如 read() 或 recv()；
+- typename... Args：表示任意数量的参数，使用的是C++11 的可变参数模板（variadic templates）；
+
+- 🎯 举例说明：
+- 如果你调用的是某个 socket 函数，比如：
+- ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+- 那么：
+- OriginFun 是：decltype(recv)（也可以是 ssize_t (*)(int, void*, size_t, int)）；
+- Args... 是：int, void*, size_t, int
+- 相当于另一种调用，connect_f(sockfd,addr,addrlen);这个hook.cc中也有写
+  
+## 9
+- fun(fd, std::forward<Args>(args)...)那这个能详细解释一下吗，参是前面std::forward<Args>这个详细讲义下
+- 是 C++ 中“完美转发” + 可变参数展开 的经典写法
+- 这个是 完美转发（perfect forwarding） 的核心技巧。
+- ✅ 完美转发的作用：
+- 保留参数的“引用性”或“右值性”。
+- 如果传入的是左值，就转发成左值；
+- 如果传入的是右值，就转发成右值；
+- 避免拷贝、重复构造等性能浪费。
+  
+## 10
+
+
+
 
