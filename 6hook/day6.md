@@ -93,7 +93,9 @@
 - 避免拷贝、重复构造等性能浪费。
   
 ## 10
-
+- va_start(va,request);void* arg=va_arg(va,void*);解释一下
+- 始化一个 va_list 变量（va），让它指向request 参数后面的第一个可变参数的位置。
+- 从 va 当前指向的位置，取出一个类型为 void* 的参数，并把 va 推进到下一个变参的位置
 
 
 

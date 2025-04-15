@@ -351,96 +351,176 @@ retry:
             // 7	IO 就绪恢复后继续调用，或者超时返回
             go to retry;
         }
-        }
+    }
 }
 ssize_t send(int sockfd, const void *buf, size_t len, int flags)
 {
-    return io_do(sockfd, send_f, "send", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags);
+    return io_do(sockfd, send_f, "send", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, len, flags);
 }
 
 ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen)
 {
-    return io_do(sockfd, sendto_f, "sendto", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags);
+    return io_do(sockfd, sendto_f, "sendto", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, len, flags);
 }
 ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags)
 {
-    return io_do(sockfd, sendmsg_f, "sendmsg", sylar::IOManager::READ,SO_SNDTIMEO, msg,flags);
+    return io_do(sockfd, sendmsg_f, "sendmsg", sylar::IOManager::WRITE, SO_SNDTIMEO, msg, flags);
 }
 ssize_t recv(int sockfd, void *buf, size_t len, int flags)
 {
-    return io_do(sockfd, recv_f, "recv", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags);
+    return io_do(sockfd, recv_f, "recv", sylar::IOManager::READ, SO_SNDTIMEO, buf, len, flags);
 }
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
 {
-    return io_do(sockfd, recvfrom_f, "recvfrom", sylar::IOManager::READ,SO_SNDTIMEO, buf,len,flags,src_addr,addrlen);
+    return io_do(sockfd, recvfrom_f, "recvfrom", sylar::IOManager::READ, SO_SNDTIMEO, buf, len, flags, src_addr, addrlen);
 }
 ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
-    return io_do(sockfd, recvmsg_f, "recvmsg", sylar::IOManager::READ,SO_SNDTIMEO, msg,flags);
+    return io_do(sockfd, recvmsg_f, "recvmsg", sylar::IOManager::READ, SO_SNDTIMEO, msg, flags);
 }
 
 // 文件/套接字读写相关（unistd.h）
 ssize_t read(int fd, void *buf, size_t count)
 {
-    return io_do(fd, read_f, "read", sylar::IOManager::READ,SO_SNDTIMEO, buf,count);
+    return io_do(fd, read_f, "read", sylar::IOManager::READ, SO_SNDTIMEO, buf, count);
 }
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
 {
-    return io_do(fd, readv_f, "readv", sylar::IOManager::READ,SO_SNDTIMEO, iov,iovcnt);
+    return io_do(fd, readv_f, "readv", sylar::IOManager::READ, SO_SNDTIMEO, iov, iovcnt);
 }
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 {
-    return io_do(fd, writev_f, "writev", sylar::IOManager::WRITE,SO_SNDTIMEO, iov,iovcnt);
+    return io_do(fd, writev_f, "writev", sylar::IOManager::WRITE, SO_SNDTIMEO, iov, iovcnt);
 }
 ssize_t write(int fd, const void *buf, size_t count)
 {
-    return io_do(fd, write_f, "write", sylar::IOManager::WRITE,SO_SNDTIMEO, buf,count);
+    return io_do(fd, write_f, "write", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, count);
 }
-
-// 关闭文件描述符（unistd.h）
+// 下面资格写要是需要改变fd里面有关于ctx的，那么就需要设置一下
+//  关闭文件描述符（unistd.h）
 int close(int fd)
 {
     if (!sylar::is_hook_enable())
     {
         return close_f(fd);
     }
+    std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd);
+    if (fdctx)
+    {
+        sylar::IOManager *iom = sylar::IOManager::GetThis();
+        if (iom)
+        {
+            iom->cancelAll(fd);
+        }
+        sylar::Singleton<sylar::FdManager>::GetInstance()->del(fd);
+    }
 }
 
 // 控制类函数
 int fcntl(int fd, int cmd, ... /* arg */)
 {
-    if (!sylar::is_hook_enable())
+    va_list va;
+    va_start(va, cmd);
+    switch (cmd)
     {
-        return fcntl_f(fd, cmd);
-    }
-}
-int ioctl(int fd, unsigned long request, ...)
-{
-    if (!sylar::is_hook_enable())
+        // 这个设置成这样就是要是用户不让设置成得阻塞但是系统让，那就还是听系统的话
+    case F_SETFL:
     {
-        return ioctl_f(fd, request);
+        int arg = va_arg(va, int);
+        va_end(va);
+        std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdCtx>::GetInstance()->get(fd);
+        if (!fdctx || fdctx->isClose() || !fdctx->isSocket())
+        {
+            return fcntl_f(fd, cmd, arg);
+        }
+        // fdctx->setSysNonblock(arg );这样不行吗，是的，这是用户传给 fcntl(fd, F_SETFL, arg) 的 flag 位掩码，arg 可能是这些位的组合
+        fdctx->setSysNonblock(arg & O_NONBLOCK);
+        if (fdctx->getSysNonblock())
+        {
+            arg |= O_NONBLOCK;
+        }
+        else
+        {
+            arg &= ~O_NONBLOCK;
+        }
+        return fcntl_f(fd, cmd, arg);
     }
-}
-int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
-{
+    break;
+    case F_GETFL:
+    {
+        va_end(va);
+        int arg = fcntl_f(fd, cmd);
+        std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd);
+        if (!fdctx || fdctx->isClose() || !fdctx->isSocket())
+        {
+            return arg;
+        }
+        if (fdctx->getSysNonblock())
+        {
+            arg |= O_NONBLOCK;
+        }
+        else
+        {
+            arg &= ~O_NONBLOCK;
+        }
+        return arg;
+    }
+    break;
+    //这些就直接调用defalut就行了
+    case F_DUPFD://复制一个文件描述符（返回一个新的 fd）
+    case F_DUPFD_CLOEXEC://类似 F_DUPFD，但会自动加上 FD_CLOEXEC 标志（进程 exec 时关闭）
+    case F_SETFD://设置文件描述符标志，比如 FD_CLOEXEC
+    case F_SETOWN://设置接收 SIGIO/SIGURG 信号的进程或线程
+    case F_SETSIG://设置 I/O 异步通知信号
+    case F_SETLEASE://设置文件租约（lease）相关行为（高级功能）
+    case F_NOTIFY://用于设置文件变化通知（inotify 相关）
+    default:
+        va_end(va);
+        fcntl_f(fd, cmd);
+    }
+    int ioctl(int fd, unsigned long request, ...)
+    {
+        va_list va;
+        va_start(va, request);
+        void *arg = va_arg(va, void *);
+        va_end(va);
+        // FIONBIO是设置是否阻塞，取决于arg的值
+        if (request == FIONBIO)
+        {
+            std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd);
+            if (!fdctx || fdctx->isClose() || !fdctx->isSocket())
+            {
+                return ioctl_f(fd, request, arg);
+            }
+            // bool user_nonblock=(bool)*(int*)arg;这样应该也可以
+            bool user_nonblock = !!*(int *)arg;
+            fdctx->setUserNonblock(user_nonblock);
+        }
+        return ioctl_f(fd, request, arg);
+    }
+    int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
+    {
         return getsockopt_f(sockfd, level, optname, optval, optlen);
-}
-int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen)
-{
-    if (!sylar::is_hook_enable())
+    }
+    int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen)
     {
+        if (!sylar::is_hook_enable())
+        {
+            return setsockopt_f(sockfd, level, optname, optval, optlen);
+        }
+        if (level == SOL_SOCKET)
+        {
+            // 设置超时时间
+            if (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO)
+            {
+                std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(sockfd);
+                if (!fdctx)
+                {
+                    return -1;
+                }
+                const struct timeval *tv = (const struct timeval *)optval;
+                fdctx->setTimeout(optname, tv->tv_sec * 1000 + tv->tv_usec / 1000);
+            }
+        }
         return setsockopt_f(sockfd, level, optname, optval, optlen);
     }
-    if(level==SOL_SOCKET){
-        //设置超时时间
-        if(optname==SO_SNDTIMEO||optname==SO_RCVTIMEO){
-        std::shared_ptr<sylar::FdCtx>fdctx=sylar::Singleton<sylar::FdManager>::GetInstance()->get(sockfd);
-        if(!fdctx){
-            return -1;
-        }
-        const struct timeval* tv=(const struct timeval*)optval;
-        fdctx->setTimeout(optname,tv->tv_sec*1000+tv->tv_usec/1000);
-        }
-    }
-    return setsockopt_f(sockfd, level, optname, optval, optlen);
-}
