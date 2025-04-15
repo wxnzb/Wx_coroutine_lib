@@ -1,6 +1,7 @@
 #include "schedule.h"
 #include "thread.h"
 #include<iostream>
+#include<assert.h>
 static bool debug=true;
 namespace sylar
 {
@@ -43,17 +44,18 @@ namespace sylar
     }
     void Scheduler::start()
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         if (m_stopping)
         {
+            std::cerr << "Scheduler is stopped" << std::endl;
             return;
         }
-        // 这里为什么要加锁,所以这个锁是哪里来的
-        std::lock_guard<std::mutex> lock(m_mutex);
+        assert(m_threads.empty());
         m_threads.resize(m_threadNum);
         for (size_t i = 0; i < m_threadNum; i++)
         {
-            m_threads[i] = std::make_shared<Thread>(std::bind(&Scheduler::run, this), m_name + "_" + std::to_string(i));
-            m_threadIds.push_back(m_threads[i]->GetThreadId());
+            m_threads[i].reset(new Thread(std::bind(&Scheduler::run, this), m_name + "_" + std::to_string(i)));
+            m_threadIds.push_back(m_threads[i]->getId());
         }
         if(debug) std::cout<<"Scheduler::start() success\n";
     }

@@ -75,7 +75,7 @@ class Scheduler{
     bool m_user_caller;
     int m_user_id;
     //是否正在关闭
-    bool m_stopping;
+    bool m_stopping=false;
     std::string m_name;
     //调度携程
     std::shared_ptr<Fiber>m_schedulerFiber;

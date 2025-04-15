@@ -25,8 +25,8 @@ int main(){
     addr.sin_addr.s_addr=inet_addr("103.235.46.96");
     connect(sock,(sockaddr*)&addr,sizeof(addr));
     fcntl(sock,F_SETFL,O_NONBLOCK);
-    manager.addEvent(sock,IOManager::WRITE,func2);
-    manager.addEvent(sock,IOManager::READ,func1);
+    manager.addEvent(sock,IOManager::WRITE,&func2);
+    manager.addEvent(sock,IOManager::READ,&func1);
     std::cout<<"event has been posted\n\n";
     return 0;
 }

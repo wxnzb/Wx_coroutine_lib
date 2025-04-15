@@ -2,6 +2,8 @@
 #include<memory>
 #include<atomic>
 #include<cstdlib>
+#include<iostream>
+static bool debug=false;
 //实现了主协程和子协程之间的切换，但是并没有完全实现调度器的功能
 //当前协程
 namespace sylar{
@@ -25,6 +27,7 @@ Fiber::Fiber(){
     //可以合并成一句m_id=s_fiber_id++;
     m_id=s_fiber_id;
     s_fiber_id++;
+    if(debug)  std::cout<<"Fiber():main id = "<<m_id<<std::endl;
 }
 //2
 //创建字携程
@@ -41,12 +44,14 @@ Fiber::Fiber(std::function<void()>cb,size_t stacksize,bool run_in_scheduler):m_c
     s_fiber_count++;
     m_id=s_fiber_id;
     s_fiber_id++;
+    if(debug)  std::cout<<"Fiber(): child id ="<<m_id<<std::endl;
 }
 Fiber::~Fiber(){
     s_fiber_count--;
     if(m_stack){
         free(m_stack);
     }
+    if(debug) std::cout<<"~Fiber(): id = "<<m_id<<std::endl;
 }
 void Fiber::reset(std::function<void()>cb){
     //重置说明他已经执行完毕了

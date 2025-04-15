@@ -51,7 +51,23 @@ IOManager* IOManager::GetThis(){
 - std::atomic<size_t> m_pendingEventCount={0};
         //int m_pendingEventCount=0;
 - 为什么用上面这个，不用下面这个
-
+  
+## 9
+- 整个工作流程
+//1.IOManager manager(2);
+//IOManager::IOManager(size_t threads, bool use_caller, const std::string &name): Scheduler(threads, use_caller, name), TimerManager()
+//这句会先运行Scheduler(threads, use_caller, name)
+//这个里面因为默认use_caller，也就是主线程创建一个携程，并绑定 Scheduler::run()函数，线程数-1
+//然后运行IOManager::IOManager(size_t threads, bool use_caller, const std::string &name):
+//他主要是创建epoll并等待读事件，接着start函数
+//运行void Scheduler::start()函数
+//根据线程数创建每一个线程并绑定 Scheduler::run()函数
+//在创建新线程是，他会自动调用新线程的构造函数，运行Thread::Thread(std::function<void()> cb, const std::string &name)
+//关键是他里面这行代码： int rt = pthread_create(&m_thread, nullptr, &Thread::run, this);他主要是创建一个线程并运行绑定的Thread::run
+//在Thread::run这个函数中，主要运行cb();也就是Scheduler::run()函数
+//Scheduler::run()函数中，要是是新创建的线程，此时里面还没携程，需要先创建一个，然后取任务，要是这个任务指定的线程不是自己，就通过tickle();通知其他线程，然后通过携程来执行取出来要求是这个线程id的任务，要是这个线程上还没有任务，就主要运行idle_fiber->resume();	这个代码来执行空闲携程
+//idle_fiber->resume()实际上std::shared_ptr<Fiber> idle_fiber = std::make_shared<Fiber>(std::bind(&Scheduler::idle, this));他是这样初始化的，而 IOManager 是继承自 Scheduler 的，并且 重写了 idle() 函数，所以调用的其实是IOManager::idle()函数
+//这个函数主要是调用epoll_wait 等待 IO 事件或定时器超时
 
 
 

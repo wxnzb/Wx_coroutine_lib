@@ -5,22 +5,23 @@
 
 namespace sylar
 {
-    // 非要这样用吗？？？
-    //  static thread_local Thread* t_thread=nullptr;
-    //  static thread_local std::string t_thread_name="UNKOWN";
-    Thread *t_thread = nullptr;
-    std::string t_thread_name = "UNKOWN";
-            Thread::Thread(std::function<void()> cb, std::string name) : m_name(name), m_cb(cb)
+    // 非要这样用吗？？？这样不行吗？
+    // Thread *t_thread = nullptr;
+    // std::string t_thread_name = "UNKOWN";
+    static thread_local Thread *t_thread = nullptr;
+    static thread_local std::string t_thread_name = "UNKOWN";
+    Thread::Thread(std::function<void()> cb, std::string name) : m_name(name), m_cb(cb)
+    {
+        // 这里的this指的是什么?-在主线程main中new Thread()时，This代表的是新创建的这个Thread对象，可以在这个是这打印出This，这样run的时候就可以找到this->m_cb了
+        // 那么这里为啥可以直接访问m_semaphore，而不能通过run去访问m_cb呢，主要就是因为run是static
+        int rt = pthread_create(&m_thread, nullptr, &Thread::run, this);
+        if (rt)
         {
-            //这里的this指的是什么?-在主线程main中new Thread()时，This代表的是新创建的这个Thread对象，可以在这个是这打印出This，这样run的时候就可以找到this->m_cb了
-            //那么这里为啥可以直接访问m_semaphore，而不能通过run去访问m_cb呢，主要就是因为run是static
-            int rt = pthread_create(&m_thread, nullptr, &Thread::run, this);
-            if (rt)
-            {
-                std::cout << "pthread_create error" << std::endl;
-            }
-            m_semaphore.wait();
+            std::cerr << "pthread_create thread fail, rt=" << rt << " name=" << name;
+            throw std::logic_error("pthread_create error");
         }
+        m_semaphore.wait();
+    }
     Thread::~Thread()
     {
         if (m_thread)
@@ -36,7 +37,8 @@ namespace sylar
             int rt = pthread_join(m_thread, nullptr);
             if (rt)
             {
-                std::cout << "pthread_join error" << std::endl;
+                std::cerr << "pthread_join failed, rt = " << rt << ", name = " << m_name << std::endl;
+                throw std::logic_error("pthread_join error");
             }
             m_thread = 0;
         }
@@ -49,14 +51,14 @@ namespace sylar
 
         t_thread = thread;
         t_thread_name = thread->m_name;
-
+        
         pthread_setname_np(pthread_self(), thread->m_name.substr(0, 15).c_str());
         // 回调
         std::function<void()> cb;
         cb.swap(thread->m_cb);
         thread->m_semaphore.singal();
         cb();
-        //t_thread->m_cb();//上面这样好像可以提高效率
+        // t_thread->m_cb();//上面这样好像可以提高效率
         return 0;
     }
     pid_t Thread::GetThreadId()
