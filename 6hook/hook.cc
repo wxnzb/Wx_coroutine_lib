@@ -267,13 +267,6 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
     }
     return connect_with_timeout(sockfd, addr, addrlen, s_connect_timeout);
 }
-int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
-{
-    if (!sylar::is_hook_enable())
-    {
-        return accept_f(sockfd, addr, addrlen);
-    }
-}
 template <typename OriginFun, typename... Args>
 static ssize_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t event, int timeout_so, Args &&...args)
 {
@@ -368,25 +361,25 @@ ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags)
 }
 ssize_t recv(int sockfd, void *buf, size_t len, int flags)
 {
-    return io_do(sockfd, recv_f, "recv", sylar::IOManager::READ, SO_SNDTIMEO, buf, len, flags);
+    return io_do(sockfd, recv_f, "recv", sylar::IOManager::READ, SO_RCVTIMEO, buf, len, flags);
 }
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
 {
-    return io_do(sockfd, recvfrom_f, "recvfrom", sylar::IOManager::READ, SO_SNDTIMEO, buf, len, flags, src_addr, addrlen);
+    return io_do(sockfd, recvfrom_f, "recvfrom", sylar::IOManager::READ, SO_RCVTIMEO, buf, len, flags, src_addr, addrlen);
 }
 ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
-    return io_do(sockfd, recvmsg_f, "recvmsg", sylar::IOManager::READ, SO_SNDTIMEO, msg, flags);
+    return io_do(sockfd, recvmsg_f, "recvmsg", sylar::IOManager::READ, SO_RCVTIMEO, msg, flags);
 }
 
 // 文件/套接字读写相关（unistd.h）
 ssize_t read(int fd, void *buf, size_t count)
 {
-    return io_do(fd, read_f, "read", sylar::IOManager::READ, SO_SNDTIMEO, buf, count);
+    return io_do(fd, read_f, "read", sylar::IOManager::READ, SO_RCVTIMEO, buf, count);
 }
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
 {
-    return io_do(fd, readv_f, "readv", sylar::IOManager::READ, SO_SNDTIMEO, iov, iovcnt);
+    return io_do(fd, readv_f, "readv", sylar::IOManager::READ, SO_RCVTIMEO, iov, iovcnt);
 }
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 {
@@ -395,6 +388,16 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 ssize_t write(int fd, const void *buf, size_t count)
 {
     return io_do(fd, write_f, "write", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, count);
+}
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+{
+    int fd = io_do(sockfd, accept_f, "accept", sylar::IOManager::READ, SO_RCVTIMEO, addr, addrlen);
+    // 为fd创建ctx
+    if (fd >= 0)
+    {
+        sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd, true);
+    }
+    return fd;
 }
 // 下面资格写要是需要改变fd里面有关于ctx的，那么就需要设置一下
 //  关闭文件描述符（unistd.h）
@@ -466,61 +469,100 @@ int fcntl(int fd, int cmd, ... /* arg */)
         return arg;
     }
     break;
-    //这些就直接调用defalut就行了
-    case F_DUPFD://复制一个文件描述符（返回一个新的 fd）
-    case F_DUPFD_CLOEXEC://类似 F_DUPFD，但会自动加上 FD_CLOEXEC 标志（进程 exec 时关闭）
-    case F_SETFD://设置文件描述符标志，比如 FD_CLOEXEC
-    case F_SETOWN://设置接收 SIGIO/SIGURG 信号的进程或线程
-    case F_SETSIG://设置 I/O 异步通知信号
-    case F_SETLEASE://设置文件租约（lease）相关行为（高级功能）
-    case F_NOTIFY://用于设置文件变化通知（inotify 相关）
+    // 这些就直接调用defalut就行了
+    case F_DUPFD:         // 复制一个文件描述符（返回一个新的 fd）
+    case F_DUPFD_CLOEXEC: // 类似 F_DUPFD，但会自动加上 FD_CLOEXEC 标志（进程 exec 时关闭）
+    case F_SETFD:         // 设置文件描述符标志，比如 FD_CLOEXEC
+    case F_SETOWN:        // 设置接收 SIGIO/SIGURG 信号的进程或线程
+    case F_SETSIG:        // 设置 I/O 异步通知信号
+    case F_SETLEASE:      // 设置文件租约（lease）相关行为（高级功能）
+    case F_NOTIFY:        // 用于设置文件变化通知（inotify 相关）
+    case F_GETFD:         // 获取文件描述符标志
+    case F_GETOWN:        // 获取异步信号接收者
+    case F_GETSIG:        // 获取当前异步信号编号
+    case F_GETLEASE:      // 获取文件的租约类型
+    case F_SETLK:         // 设置文件锁（非阻塞）
+    case F_SETLKW:        // 设置文件锁（阻塞）
+    case F_GETOWN_EX:     // 获取异步信号接收者（扩展）
+    case F_GETLK:         // 获取文件锁状态
+    {
+       struct flock* arg=va_arg(va,struct flock*);
+       va_end(va);
+       return fcntl_f(fd,cmd,arg);
+    }
+    break;
+    case F_SETOWN_EX: // 设置异步信号接收者
+    {
+       struct f_owner_ex* arg=va_arg(va,struct f_owner_ex*);
+       va_end(va);
+       return fcntl_f(fd,cmd,arg);
+    }
+    break;
+#ifdef F_GETPIPE_SZ
+    case F_GETPIPE_SZ: // 获取管道大小
+    {
+        va_end(va);
+        return fcntl_f(fd, cmd);
+    }
+    break;
+#endif
+#ifdef F_SETPIPE_SZ
+    case F_SETPIPE_SZ: // 设置管道大小
+    {
+        int arg = va_arg(va, int);
+        va_end(va);
+        return fcntl_f(fd, cmd, arg);
+    }
+    break;
+#endif
     default:
         va_end(va);
         fcntl_f(fd, cmd);
     }
-    int ioctl(int fd, unsigned long request, ...)
+}
+int ioctl(int fd, unsigned long request, ...)
+{
+    va_list va;
+    va_start(va, request);
+    void *arg = va_arg(va, void *);
+    va_end(va);
+    // FIONBIO是设置是否阻塞，取决于arg的值
+    if (request == FIONBIO)
     {
-        va_list va;
-        va_start(va, request);
-        void *arg = va_arg(va, void *);
-        va_end(va);
-        // FIONBIO是设置是否阻塞，取决于arg的值
-        if (request == FIONBIO)
+        std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd);
+        if (!fdctx || fdctx->isClose() || !fdctx->isSocket())
         {
-            std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd);
-            if (!fdctx || fdctx->isClose() || !fdctx->isSocket())
-            {
-                return ioctl_f(fd, request, arg);
-            }
-            // bool user_nonblock=(bool)*(int*)arg;这样应该也可以
-            bool user_nonblock = !!*(int *)arg;
-            fdctx->setUserNonblock(user_nonblock);
+            return ioctl_f(fd, request, arg);
         }
-        return ioctl_f(fd, request, arg);
+        // bool user_nonblock=(bool)*(int*)arg;这样应该也可以
+        bool user_nonblock = !!*(int *)arg;
+        fdctx->setUserNonblock(user_nonblock);
     }
-    int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
+    return ioctl_f(fd, request, arg);
+}
+int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
+{
+    return getsockopt_f(sockfd, level, optname, optval, optlen);
+}
+int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen)
+{
+    if (!sylar::is_hook_enable())
     {
-        return getsockopt_f(sockfd, level, optname, optval, optlen);
-    }
-    int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen)
-    {
-        if (!sylar::is_hook_enable())
-        {
-            return setsockopt_f(sockfd, level, optname, optval, optlen);
-        }
-        if (level == SOL_SOCKET)
-        {
-            // 设置超时时间
-            if (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO)
-            {
-                std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(sockfd);
-                if (!fdctx)
-                {
-                    return -1;
-                }
-                const struct timeval *tv = (const struct timeval *)optval;
-                fdctx->setTimeout(optname, tv->tv_sec * 1000 + tv->tv_usec / 1000);
-            }
-        }
         return setsockopt_f(sockfd, level, optname, optval, optlen);
     }
+    if (level == SOL_SOCKET)
+    {
+        // 设置超时时间
+        if (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO)
+        {
+            std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(sockfd);
+            if (!fdctx)
+            {
+                return -1;
+            }
+            const struct timeval *tv = (const struct timeval *)optval;
+            fdctx->setTimeout(optname, tv->tv_sec * 1000 + tv->tv_usec / 1000);
+        }
+    }
+    return setsockopt_f(sockfd, level, optname, optval, optlen);
+}
