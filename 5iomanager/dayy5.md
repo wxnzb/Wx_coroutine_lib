@@ -53,6 +53,25 @@ IOManager* IOManager::GetThis(){
 - 为什么用上面这个，不用下面这个
   
 ## 9
+- tickle 就是为了在“没有 IO 事件”的情况下，也能唤醒线程来处理协程、定时器、任务等其它调度事件。因为epoll_wait被唤醒的条件是有IO事件，但是有些比如定时器、任务等，不是IO事件，所以需要tickle来唤醒
+## 10
+- 为什么已经唤醒IO事件了，直接加入队，然后退出idel就行了，为什么还要调用tickle();
+- A本来在epoll_wait阶段，但是被事件唤醒，执行triggerEvent(),在这个函数里面将事件加入队列，还需要调用tickle的原因是他可能唤醒的是另一个正在epoll_wait的线程对吗
+## 10
+-   // for (auto &i : m_threads)
+        // {
+        //     i->join();
+        // }
+        std::vector<std::shared_ptr<Thread>> thrs;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            thrs.swap(m_threads);
+        }
+        for(auto &i:thrs){
+            i->join();
+        }
+- 上面的方法最好别用，因为m_threads是公共的，那样访问不安全
+## 10
 - 整个工作流程
 //1.IOManager manager(2);
 //IOManager::IOManager(size_t threads, bool use_caller, const std::string &name): Scheduler(threads, use_caller, name), TimerManager()
@@ -65,9 +84,77 @@ IOManager* IOManager::GetThis(){
 //在创建新线程是，他会自动调用新线程的构造函数，运行Thread::Thread(std::function<void()> cb, const std::string &name)
 //关键是他里面这行代码： int rt = pthread_create(&m_thread, nullptr, &Thread::run, this);他主要是创建一个线程并运行绑定的Thread::run
 //在Thread::run这个函数中，主要运行cb();也就是Scheduler::run()函数
-//Scheduler::run()函数中，要是是新创建的线程，此时里面还没携程，需要先创建一个，然后取任务，要是这个任务指定的线程不是自己，就通过tickle();通知其他线程，然后通过携程来执行取出来要求是这个线程id的任务，要是这个线程上还没有任务，就主要运行idle_fiber->resume();	这个代码来执行空闲携程
+/这个/Scheduler::run()函数中，要是是新创建的线程，此时里面还没携程，需要先创建一个，然后取任务，要是这个任务指定的线程不是自己，就通过tickle();通知其他线程，然后通过携程来执行取出来要求是这个线程id的任务，要是线程上还没有任务，就主要运行idle_fiber->resume();	这个代码来执行空闲携程
 //idle_fiber->resume()实际上std::shared_ptr<Fiber> idle_fiber = std::make_shared<Fiber>(std::bind(&Scheduler::idle, this));他是这样初始化的，而 IOManager 是继承自 Scheduler 的，并且 重写了 idle() 函数，所以调用的其实是IOManager::idle()函数
-//这个函数主要是调用epoll_wait 等待 IO 事件或定时器超时
+//这个函数主要是调用epoll_wait 等待 IO 事件或定时器超时，然后执行相应那两个的回调函数，让出携程
+//这里还是要详细讲一下，1.要是有不是IO事件的，例如所有的线程都在epoll_wait这步了，现在有个线程他将一个不是IO事件的任务加进队列了，此时调用tickle(),这个函数里面会他会通过m_tickleFds[1]写入，那么就会唤醒epoll_wait,通过read读并跳过，然后让出携程，就运行到schedule::run这里了2.IO事件唤醒epoll_wait的，就将事件通过triggerEvent函数主要调用scheduleLock，他主要是加入调度队列，要是队列为空，那么加入任务后应该立即通过tickle();唤醒别的正在epoll_wait的线程，或者是自己，最后通过 Fiber::GetThis()->yield();让出携程，此时他在Schedule::run中，他为什么又是遍历取出任务执行任务，执行完后又会在run这个循环中没事件就又进入idel
+
+✅ 1. 所有线程都在 epoll_wait 中等待时：
+场景：添加一个非 IO 的协程任务。
+
+比如你手动调用了 scheduler.schedule(func) 或者定时器到期触发了一个回调。
+
+这些新任务会被加入调度器的 m_tasks 队列中。
+
+因为此时所有线程可能都在 epoll_wait 阻塞状态，所以：
+
+需要主动调用 tickle()。
+
+tickle() 往 m_tickleFds[1] 写入字节。
+
+epoll_wait() 中注册了对 m_tickleFds[0] 的监听，会因此被唤醒。
+
+被唤醒的线程读出这个字节（防止边沿触发一直存在），然后继续往下走，yield 出 idle 协程，让出 CPU 给调度器，从而进入 Scheduler::run() 主循环继续执行新任务。
+
+✅ 2. IO 事件触发唤醒 epoll_wait：
+比如 socket 收到数据，EPOLLIN 事件触发。
+
+epoll_wait 返回，进入 idle() 的事件处理逻辑。
+
+找到对应的 FdContext，调用 triggerEvent()。
+
+triggerEvent() 会：
+
+将协程或回调加入任务队列（scheduleLock()）。
+
+如果之前任务队列是空的，会调用 tickle()，唤醒可能不是当前线程的其他空闲线程。
+
+然后继续处理其他事件，最后调用 Fiber::GetThis()->yield()，把 idle 协程挂起，控制权交回 Scheduler::run()。
+
+进入 Scheduler::run()，开始遍历任务队列，把刚才那个 IO 协程调度执行。
+
+✅ 3. 为什么已经在当前线程里加入了任务，还要调用 tickle()？
+因为当前线程可能不执行它自己调度的任务（比如已经有别的任务在处理、线程策略是优先其他线程）。
+
+更重要的是，为了唤醒其他空闲线程一起来处理新任务（例如多核利用）。
+
+所以 tickle 是一种“广播信号”：告诉其他正在 epoll_wait 的线程“有新任务了”，快醒来！
+
+✅ 最终完整流程（你说得对，补几个关键点）：
+所有线程空闲，进入 idle() 中 epoll_wait() 阻塞。
+
+某线程添加新任务：
+
+是 IO：系统唤醒 epoll_wait，处理事件。
+
+不是 IO：需要主动 tickle() 唤醒。
+
+epoll_wait 被唤醒后，idle 协程调用 Fiber::GetThis()->yield()。
+
+控制权交回到 Scheduler::run()，从队列中取出任务执行。
+
+任务执行完后，如果没有新任务，又会进入 idle()，循环继续。
+
+可以把这个系统类比成一个饭店：
+
+epoll_wait 就像厨师在厨房发呆（等订单）。
+
+tickle() 就像服务员敲锅：有订单啦！
+
+idle() 是厨师闲着时的状态。
+
+schedule() + run() 是厨师做菜（执行任务）。
+
 
 
 

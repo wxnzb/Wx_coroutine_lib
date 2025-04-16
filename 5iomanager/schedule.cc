@@ -1,13 +1,14 @@
 #include "schedule.h"
 #include "thread.h"
-#include<iostream>
-#include<assert.h>
-static bool debug=true;
+#include <iostream>
+#include <assert.h>
+static bool debug = true;
 namespace sylar
 {
     Scheduler *t_scheduler = nullptr;
     Scheduler::Scheduler(size_t threads, bool user_caller, const std::string &name) : m_name(name), m_user_caller(user_caller)
     {
+        assert(threads > 0 && Scheduler::GetThis() == nullptr);
         SetThis();
         Thread::SetName(name);
         // 使用主线程当作工作线程
@@ -24,7 +25,8 @@ namespace sylar
             m_threadIds.push_back(m_rootId);
         }
         m_threadNum = threads;
-        if(debug) std::cout<<"Scheduler::Scheduler() success\n";
+        if (debug)
+            std::cout << "Scheduler::Scheduler() success\n";
     }
     Scheduler::~Scheduler()
     {
@@ -32,7 +34,8 @@ namespace sylar
         {
             t_scheduler == nullptr;
         }
-        if(debug) std::cout<<" Scheduler::~Scheduler() success\n";
+        if (debug)
+            std::cout << " Scheduler::~Scheduler() success\n";
     }
     Scheduler *Scheduler::GetThis()
     {
@@ -57,21 +60,29 @@ namespace sylar
             m_threads[i].reset(new Thread(std::bind(&Scheduler::run, this), m_name + "_" + std::to_string(i)));
             m_threadIds.push_back(m_threads[i]->getId());
         }
-        if(debug) std::cout<<"Scheduler::start() success\n";
+        if (debug)
+            std::cout << "Scheduler::start() success\n";
     }
     void Scheduler::stop()
     {
-        if(debug) std::cout<<" Scheduler::stop() starts in thread: "<<Thread::GetThreadId()<<std::endl;
+        if (debug)
+            std::cout << " Scheduler::stop() starts in thread: " << Thread::GetThreadId() << std::endl;
         // 这里先进行判断一下
         if (m_stopping)
         {
             return;
         }
         m_stopping = true;
+        if(m_user_caller){
+            assert(GetThis()==this);
+        }else{
+            assert(GetThis()!=this);
+        }
         for (size_t i = 0; i < m_threadNum; i++)
         {
             tickle();
         }
+        //m_schedulerFiber.reset(new Fiber(std::bind(&Scheduler::run, this), 0, false)); // false -> 该调度协程退出后将返回主协程
         // 感觉这里应该是if (m_usercalller),这里使唤醒主线程的主携程
         if (m_schedulerFiber)
         {
@@ -80,26 +91,37 @@ namespace sylar
         // 这里是唤醒调度器携程
         if (m_schedulerFiber)
         {
-            m_schedulerFiber->resume();
-            if(debug) std::cout<<"m_schedulerFiber ends in thread: "<<Thread::GetThreadId()<<std::endl;
+            m_schedulerFiber->resume();//这里应该回到run了
+            if (debug)
+                std::cout << "m_schedulerFiber ends in thread: " << Thread::GetThreadId() << std::endl;
         }
-        for (auto &i : m_threads)
+        // for (auto &i : m_threads)
+        // {
+        //     i->join();
+        // }
+        std::vector<std::shared_ptr<Thread>> thrs;
         {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            thrs.swap(m_threads);
+        }
+        for(auto &i:thrs){
             i->join();
         }
-        if(debug) std::cout<<" Schedule::stop() ends in thread: "<<Thread::GetThreadId()<<std::endl;
+        if (debug)
+            std::cout << " Schedule::stop() ends in thread: " << Thread::GetThreadId() << std::endl;
     }
     void Scheduler::tickle()
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_cond.notify_one();
+        // std::lock_guard<std::mutex> lock(m_mutex);
+        // m_cond.notify_one();
     }
     void Scheduler::idle()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
         while (!m_stopping)
         {
-            if(debug) std::cout<<" Scheduler::idle(),sleeping in thread: "<<Thread::GetThreadId()<<std::endl;
+            if (debug)
+                std::cout << " Scheduler::idle(),sleeping in thread: " << Thread::GetThreadId() << std::endl;
             m_cond.wait(lock);
             lock.unlock();
             // 这里让出协程，让他执行其他协程，因为他被tickle唤醒了，就代表有任务了
@@ -111,7 +133,8 @@ namespace sylar
     {
         // 1.线程 ID 相关
         int thread_id = Thread::GetThreadId();
-        if(debug) std::cout<<"Scheduler::run() starts in thread: "<<thread_id<<std::endl;
+        if (debug)
+            std::cout << "Scheduler::run() starts in thread: " << thread_id << std::endl;
         if (thread_id != m_rootId)
         {
             // 不是主线程的话要创建主协程
@@ -139,8 +162,10 @@ namespace sylar
                         tickle_me = true;
                         continue;
                     }
+                    assert(it->fiber || it->cb);
                     task = *it;
                     m_tasks.erase(it);
+                    m_activeThreadCount++;
                     break;
                 }
                 tickle_me = tickle_me || (it != m_tasks.end());
@@ -152,7 +177,10 @@ namespace sylar
             if (task.fiber)
             {
                 std::lock_guard<std::mutex> lock(task.fiber->m_mutex);
-                task.fiber->resume();
+                if (task.fiber->getState() != Fiber::TERM)
+                {
+                    task.fiber->resume();
+                }
                 m_activeThreadCount--;
                 task.reset();
             }
@@ -174,7 +202,8 @@ namespace sylar
             {
                 if (idle_fiber->getState() == Fiber::TERM)
                 {
-                    if(debug) std::cout<<"Scheduler::run() ends in thread: "<<thread_id<<std::endl;
+                    if (debug)
+                        std::cout << "Scheduler::run() ends in thread: " << thread_id << std::endl;
                     break;
                 }
                 m_idleThreadCount++;
@@ -186,6 +215,6 @@ namespace sylar
     bool Scheduler::stopping()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        return m_stopping || m_tasks.empty() || m_activeThreadCount == 0;
+        return m_stopping && m_tasks.empty() && m_activeThreadCount == 0;
     }
 };
