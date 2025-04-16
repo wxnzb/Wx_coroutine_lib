@@ -11,7 +11,7 @@ char buf[4096];
 char send_data[]="GET / HTTP/1.0\r\n\r\n";
 void func1(){
     recv(sock,buf,4096,0);
-    std::cout<<buf<<std::endl;
+    std::cout<<buf<<std::endl<<std::endl;
 }
 void func2(){
     send(sock,send_data,sizeof(send_data),0);

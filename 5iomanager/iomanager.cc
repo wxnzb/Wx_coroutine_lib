@@ -3,6 +3,7 @@
 #include <unistd.h> //pipe
 #include <fcntl.h>
 #include <iostream>
+#include<cstring>
 static bool debug = true;
 namespace sylar
 {
@@ -228,17 +229,22 @@ namespace sylar
             int n;
             while (true)
             {
-                uint64_t MAX_TIMEOUT = 5000;
+                static const uint64_t MAX_TIMEOUT = 5000;
                 uint64_t timeout = geteralistTime();
                 uint64_t min = std::min(timeout, MAX_TIMEOUT);
-                n = epoll_wait(m_epollfd, events.get(), MAX_EVENTS, min);
-            }
+                n = epoll_wait(m_epollfd, events.get(), MAX_EVENTS, (int)min);
+                if(n<0&&errno==EINTR){
+                    continue;
+                }else{
+                    break;
+                }
+            };
             // 将超时任务加入队列
             std::vector<std::function<void()>> cbs;
             listExpiredCb(cbs);
             if (!cbs.empty())
             {
-                std::cout<<"十分怀疑没进去"<<std::endl;
+                std::cout<<"十分怀疑没进去，果然没进去"<<std::endl;
                 for (auto &cb : cbs)
                 {
                     scheduleLock(cb);
@@ -254,9 +260,10 @@ namespace sylar
                     continue;
                 }
                 FdContext *fd_ctx = (FdContext *)ev.data.ptr;
+                std::lock_guard<std::mutex>lock(fd_ctx->m_mutex);
                 if (ev.events & (EPOLLERR | EPOLLHUP))
                 {
-                    ev.events = ev.events & (EPOLLIN & EPOLLOUT);
+                    ev.events |= fd_ctx->events & (EPOLLIN | EPOLLOUT);
                 }
                 int event = NONE;
                 if (ev.events & EPOLLIN)
@@ -267,10 +274,15 @@ namespace sylar
                 {
                     event |= WRITE;
                 }
-                std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
-                int op = (ev.events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
-                ev.events = EPOLLET | (ev.events * event);
-                epoll_ctl(m_epollfd, op, fd_ctx->fd, &ev);
+                if((fd_ctx->events&event)==NONE){
+                    continue;
+                }
+                int op = (fd_ctx->events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+                ev.events = EPOLLET | (fd_ctx->events& ~event);
+                int rt=epoll_ctl(m_epollfd, op, fd_ctx->fd, &ev);
+                if(rt){
+                    std::cerr<<"idle::epoll_ctl failed "<<strerror(errno)<<std::endl;
+                }
                 if (event & READ)
                 {
                     fd_ctx->triggerEvent(READ);

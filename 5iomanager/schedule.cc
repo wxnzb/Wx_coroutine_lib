@@ -32,7 +32,7 @@ namespace sylar
     {
         if (GetThis() == this)
         {
-            t_scheduler == nullptr;
+            t_scheduler = nullptr;
         }
         if (debug)
             std::cout << " Scheduler::~Scheduler() success\n";
@@ -57,6 +57,7 @@ namespace sylar
         m_threads.resize(m_threadNum);
         for (size_t i = 0; i < m_threadNum; i++)
         {
+            std::cout << "给新线程绑定run" << std::endl;
             m_threads[i].reset(new Thread(std::bind(&Scheduler::run, this), m_name + "_" + std::to_string(i)));
             m_threadIds.push_back(m_threads[i]->getId());
         }
@@ -73,17 +74,20 @@ namespace sylar
             return;
         }
         m_stopping = true;
-        if(m_user_caller){
-            assert(GetThis()==this);
-        }else{
-            assert(GetThis()!=this);
+        if (m_user_caller)
+        {
+            assert(GetThis() == this);
+        }
+        else
+        {
+            assert(GetThis() != this);
         }
         for (size_t i = 0; i < m_threadNum; i++)
         {
             tickle();
         }
-        //m_schedulerFiber.reset(new Fiber(std::bind(&Scheduler::run, this), 0, false)); // false -> 该调度协程退出后将返回主协程
-        // 感觉这里应该是if (m_usercalller),这里使唤醒主线程的主携程
+        // m_schedulerFiber.reset(new Fiber(std::bind(&Scheduler::run, this), 0, false)); // false -> 该调度协程退出后将返回主协程
+        //  感觉这里应该是if (m_usercalller),这里使唤醒主线程的主携程
         if (m_schedulerFiber)
         {
             tickle();
@@ -91,7 +95,8 @@ namespace sylar
         // 这里是唤醒调度器携程
         if (m_schedulerFiber)
         {
-            m_schedulerFiber->resume();//这里应该回到run了
+            std::cout << "jjj" << std::endl;
+            m_schedulerFiber->resume(); // 这里应该回到run了
             if (debug)
                 std::cout << "m_schedulerFiber ends in thread: " << Thread::GetThreadId() << std::endl;
         }
@@ -104,7 +109,8 @@ namespace sylar
             std::lock_guard<std::mutex> lock(m_mutex);
             thrs.swap(m_threads);
         }
-        for(auto &i:thrs){
+        for (auto &i : thrs)
+        {
             i->join();
         }
         if (debug)
@@ -131,6 +137,7 @@ namespace sylar
     }
     void Scheduler::run()
     {
+        std::cout << "1111111111111111111111" << std::endl;
         // 1.线程 ID 相关
         int thread_id = Thread::GetThreadId();
         if (debug)
@@ -153,11 +160,13 @@ namespace sylar
             bool tickle_me = false;
             // 找任务里面需要用到这个线程的
             {
+                std::lock_guard<std::mutex> lock(m_mutex);
                 auto it = m_tasks.begin();
                 while (it != m_tasks.end())
                 {
-                    if (it->thread_id == -1 || it->thread_id != thread_id)
+                    if (it->thread_id !=-1 && it->thread_id != thread_id)
                     {
+                        it++;
                         // 说明有要运行的任务但是不是当前线程,说明还需要唤醒其他线程
                         tickle_me = true;
                         continue;
@@ -176,10 +185,12 @@ namespace sylar
             }
             if (task.fiber)
             {
-                std::lock_guard<std::mutex> lock(task.fiber->m_mutex);
-                if (task.fiber->getState() != Fiber::TERM)
                 {
-                    task.fiber->resume();
+                    std::lock_guard<std::mutex> lock(task.fiber->m_mutex);
+                    if (task.fiber->getState() != Fiber::TERM)
+                    {
+                        task.fiber->resume();
+                    }
                 }
                 m_activeThreadCount--;
                 task.reset();
@@ -192,9 +203,11 @@ namespace sylar
             //  }
             else if (task.cb)
             {
-                std::shared_ptr<Fiber> cb_fiber = std::make_shared<Fiber>(task.cb, false);
-                std::lock_guard<std::mutex> lock(cb_fiber->m_mutex);
-                cb_fiber->resume();
+                std::shared_ptr<Fiber> cb_fiber = std::make_shared<Fiber>(task.cb);
+                {
+                    std::lock_guard<std::mutex> lock(cb_fiber->m_mutex);
+                    cb_fiber->resume();
+                }
                 m_activeThreadCount--;
                 task.reset();
             }
