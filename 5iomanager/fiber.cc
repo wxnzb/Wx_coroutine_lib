@@ -4,19 +4,19 @@
 #include <cstdlib>
 #include <iostream>
 #include <assert.h>
-static bool debug = false;
+static bool debug = true;
 // 实现了主协程和子协程之间的切换，但是并没有完全实现调度器的功能
 // 当前协程
 namespace sylar
 {
-    Fiber *t_fiber = nullptr;
+    static thread_local Fiber *t_fiber = nullptr;
     // 主携程
-    std::shared_ptr<Fiber> t_thread_fiber = nullptr;
+    static thread_local std::shared_ptr<Fiber> t_thread_fiber = nullptr;
     // 调度携程
-    Fiber *t_scheduler_fiber = nullptr;
+    static thread_local Fiber *t_scheduler_fiber = nullptr;
 
-    std::atomic<uint64_t> s_fiber_id{0};
-    std::atomic<uint64_t> s_fiber_count{0};
+    static std::atomic<uint64_t> s_fiber_id{0};
+    static std::atomic<uint64_t> s_fiber_count{0};
     // 1
     // 为啥这个不用makecontext
     // 创建的是主协程，而不是子协程
@@ -149,6 +149,7 @@ namespace sylar
     {
         if (t_fiber)
         {
+            std::cout<<"这是你应该进去的吗"<<std::endl;
             return t_fiber->shared_from_this();
         }
         // 如果没有就创建主协程，并先将调度协程也设置成这样假装一下

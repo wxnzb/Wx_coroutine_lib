@@ -144,6 +144,7 @@ namespace sylar
             std::cout << "Scheduler::run() starts in thread: " << thread_id << std::endl;
         if (thread_id != m_rootId)
         {
+            std::cout<<"++++"<<std::endl;
             // 不是主线程的话要创建主协程
             Fiber::GetThis();
         }
