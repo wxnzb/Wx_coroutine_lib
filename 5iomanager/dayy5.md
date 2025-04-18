@@ -161,5 +161,8 @@ schedule() + run() 是厨师做菜（执行任务）。
 - 主线程的新创建的携程上面绑定的是run
 - 现在我知道了，现在在主携程要运行rin,那吗就要在新创建的携程上面，为啥上面那个实现打印1,而这个实现打印2
 - 什么时候设置的t_scheduler_fiber->m_ctx
-- IOManager::idle(),run in thread:25275 他第一个这个的时候应该是在第二个线程的第二个携程里面阻塞这，为啥Schedule::stop() starts in thread: 25274这个直接有到了第一个线程里面
+- 终于找到你了，服了，找的姐姐我好辛苦-在创建主携程是GetThis()这个函数里面t_scheduler_fiber = main_fiber.get();
+- IOManager::idle(),run in thread:25275 他第一个这个的时候应该是在第二个线程的第二个携程里面阻塞这，为啥Schedule::stop() starts in thread: 25274这个直接有到了第一个线程里面，因为是在第一个线程里面进行了构造函数，但让在main结束时就在这个线程里面进行析构了
+- 现在我有个问题，他是在先创建的线程中先创建了主携程，然后就是相当于现在run就在主携程里了堆不，现在在主携程的run里面新创建了一个携程，ile_fiber,然后运行idle_fiber->resume();，在resume函数中，swapcontext(&(t_scheduler_fiber->m_ctx), &m_ctx)他会运行这句切换到新创建的携程的m_ctx,在std::shared_ptr<Fiber> idle_fiber = std::make_shared<Fiber>(std::bind(&Scheduler::idle, this));这句中makecontext(&m_ctx, &Fiber::MainFunc, 0);他会直接转到m_ctx,他绑定的就是MainFunc,运行这个函数会运行cb,也就是idle,这些都没问题，现在的问题就是从这个新携程的yied时，他时会恢复到t_scheduler_fiber->m_ctx，但此时他是哪行代码
+- 当然就是swapcontext(&(t_scheduler_fiber->m_ctx)）这一行的下一行继续开始
 
