@@ -160,4 +160,6 @@ schedule() + run() 是厨师做菜（执行任务）。
 - m_runInScheduler这个到底具体指得是什么？假设为false就是换到主携程上去
 - 主线程的新创建的携程上面绑定的是run
 - 现在我知道了，现在在主携程要运行rin,那吗就要在新创建的携程上面，为啥上面那个实现打印1,而这个实现打印2
+- 什么时候设置的t_scheduler_fiber->m_ctx
+- IOManager::idle(),run in thread:25275 他第一个这个的时候应该是在第二个线程的第二个携程里面阻塞这，为啥Schedule::stop() starts in thread: 25274这个直接有到了第一个线程里面
 
