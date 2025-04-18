@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include<cstring>
+#include<cassert>
 static bool debug = true;
 namespace sylar
 {
@@ -210,7 +211,8 @@ namespace sylar
         {
             return;
         }
-        write(m_tickleFds[0], "T", 1);
+        int rt=write(m_tickleFds[1], "T", 1);
+        assert(rt==1);
     }
     void IOManager::idle()
     {
@@ -255,6 +257,7 @@ namespace sylar
             {
                 epoll_event &ev = events[i];
                 if(ev.data.fd==m_tickleFds[0]){
+                    std::cout<<"你真聪明"<<std::endl;
                     uint8_t dummy[256];
                     while(read(m_tickleFds[0],dummy,sizeof(dummy))>0);
                     continue;
@@ -285,15 +288,18 @@ namespace sylar
                 }
                 if (event & READ)
                 {
+                    std::cout<<"ooooooooooooooo"<<std::endl;
                     fd_ctx->triggerEvent(READ);
                     m_pendingEventCount--;
                 }
                 if (event & WRITE)
                 {
+                    std::cout<<"yyyyyyyyyyyyyyyyyyyyyy"<<std::endl;
                     fd_ctx->triggerEvent(WRITE);
                     m_pendingEventCount--;
                 }
             }
+            std::cout<<"你真笨"<<std::endl;
             Fiber::GetThis()->yeid();
         }
     }
