@@ -84,19 +84,22 @@ namespace sylar
         }
         for (size_t i = 0; i < m_threadNum; i++)
         {
+            std::cout<<"@@@@@@@@@@@@@@"<<std::endl;
             tickle();
         }
         // m_schedulerFiber.reset(new Fiber(std::bind(&Scheduler::run, this), 0, false)); // false -> 该调度协程退出后将返回主协程
         //  感觉这里应该是if (m_usercalller),这里使唤醒主线程的主携程
         if (m_schedulerFiber)
         {
+            std::cout<<"$$$$$$$$$$$$$$$"<<std::endl;
             tickle();
         }
         // 这里是唤醒调度器携程
         if (m_schedulerFiber)
         {
-            std::cout << "jjj" << std::endl;
+            std::cout<<"要是在stop中m_schedulerFiber不为空,那就将他唤醒"<<std::endl;
             m_schedulerFiber->resume(); // 这里应该回到run了
+            std::cout<<"m_schedulerFiber->resume();结束"<<std::endl;
             if (debug)
                 std::cout << "m_schedulerFiber ends in thread: " << Thread::GetThreadId() << std::endl;
         }
@@ -137,14 +140,14 @@ namespace sylar
     }
     void Scheduler::run()
     {
-        std::cout << "1111111111111111111111" << std::endl;
+        std::cout << "正在run函数里面" << std::endl;
         // 1.线程 ID 相关
         int thread_id = Thread::GetThreadId();
         if (debug)
             std::cout << "Scheduler::run() starts in thread: " << thread_id << std::endl;
         if (thread_id != m_rootId)
         {
-            std::cout<<"++++"<<std::endl;
+            std::cout<<"不是主线程在运行run"<<std::endl;
             // 不是主线程的话要创建主协程
             Fiber::GetThis();
         }
@@ -220,6 +223,7 @@ namespace sylar
                         std::cout << "Scheduler::run() ends in thread: " << thread_id << std::endl;
                     break;
                 }
+                std::cout<<"到这唤醒idle携程"<<std::endl;
                 m_idleThreadCount++;
                 idle_fiber->resume();
                 m_idleThreadCount--;

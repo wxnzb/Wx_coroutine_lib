@@ -91,7 +91,7 @@ namespace sylar
         m_state = RUNNING;
         if (m_runInSheduler)
         {
-            std::cout << "1" << std::endl;
+            std::cout << "在resume()函数中，m_runInSheduler为true" << std::endl;
             // 这不是必须的，为了将局部的t_fiber这个表示当前正在与运行的实时更新
             SetThis(this);
 
@@ -103,7 +103,7 @@ namespace sylar
         }
         else
         {
-            std::cout << "2" << std::endl;
+            std::cout << "在resume()函数中，m_runInSheduler为false" << std::endl;
             SetThis(this);
             if (swapcontext(&t_thread_fiber->m_ctx, &m_ctx))
             {
@@ -149,7 +149,7 @@ namespace sylar
     {
         if (t_fiber)
         {
-            std::cout<<"这是你应该进去的吗"<<std::endl;
+            std::cout<<"这里在GetThis,现在已经有了直接返回，不用再创建主携程了"<<std::endl;
             return t_fiber->shared_from_this();
         }
         // 如果没有就创建主协程，并先将调度协程也设置成这样假装一下
@@ -173,7 +173,8 @@ namespace sylar
     void Fiber::MainFunc()
     {
         std::shared_ptr<Fiber> curr = GetThis();
-        curr->m_state = RUNNING;
+        assert(curr!=nullptr);
+        std::cout<<"现在在MainFunc()函数中"<<std::endl;
         curr->m_cb();
         curr->m_cb = nullptr;
         curr->m_state = TERM;

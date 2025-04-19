@@ -207,6 +207,7 @@ namespace sylar
     }
     void IOManager::tickle()
     {
+        std::cout<<"tickle"<<std::endl;
         if (!hasIdleThreads())
         {
             return;
@@ -299,7 +300,7 @@ namespace sylar
                     m_pendingEventCount--;
                 }
             }
-            std::cout<<"你真笨"<<std::endl;
+            std::cout<<"到这说明唤醒epoll了"<<std::endl;
             Fiber::GetThis()->yeid();
         }
     }
