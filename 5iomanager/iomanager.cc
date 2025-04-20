@@ -77,11 +77,12 @@ namespace sylar
         resetEventContext(ctx);
         return;
     }
-    void IOManager::addEvent(int fd, Event event, std::function<void()> cb)
+    int IOManager::addEvent(int fd, Event event, std::function<void()> cb)
     {
+        std::cout << "AddEvent: fd = " << fd << ", event = " << (event == WRITE ? "WRITE" : "READ") << std::endl;
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd > int(m_fdContexts.size()))
+        if (fd < int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
@@ -94,18 +95,31 @@ namespace sylar
             fd_ctx = m_fdContexts[fd];
         }
         std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+        std::cout << "fd_ctx->events = " << fd_ctx->events << std::endl;
         if (fd_ctx->events & event)
         {
-            return;
+            return -1;
         }
         int op = fd_ctx->events ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
         epoll_event ev;
         ev.events = EPOLLET | event | fd_ctx->events;
         ev.data.ptr = fd_ctx;
-        epoll_ctl(m_epollfd, op, fd, &ev);
+        //---------------------------
+        std::cout << "addEvent: fd = " << fd 
+          << ", op = " << op 
+          << ", ev = " << ev.events << std::endl;
+          //---------------------------
+        int rt=epoll_ctl(m_epollfd, op, fd, &ev);
+        if(rt){
+            std::cerr<<"epoll_ctl failed "<<strerror(errno)<<std::endl;
+            return -1;
+        }
         m_pendingEventCount++;
+
         fd_ctx->events = Event(fd_ctx->events | event);
+
         FdContext::EventContext &ctx = fd_ctx->getEventContext(event);
+        assert(!ctx.scheduler && !ctx.fiber && !ctx.cb);
         ctx.scheduler = Scheduler::GetThis();
         if (cb)
         {
@@ -114,7 +128,9 @@ namespace sylar
         else
         {
             ctx.fiber = Fiber::GetThis();
+            assert(ctx.fiber->getState() == Fiber::RUNNING);
         }
+        return 0;
     }
     void IOManager::delEvent(int fd, Event event)
     {
@@ -257,8 +273,9 @@ namespace sylar
             for (int i = 0; i < n; i++)
             {
                 epoll_event &ev = events[i];
+                std::cout << "epoll_wait returned event.events = " << ev.events << std::endl;
                 if(ev.data.fd==m_tickleFds[0]){
-                    std::cout<<"你真聪明"<<std::endl;
+                    std::cout<<"有携程通过tickle唤醒epoll了"<<std::endl;
                     uint8_t dummy[256];
                     while(read(m_tickleFds[0],dummy,sizeof(dummy))>0);
                     continue;
