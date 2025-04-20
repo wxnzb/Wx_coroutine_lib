@@ -12,7 +12,7 @@ namespace sylar
         {
             NONE = 0x0,
             READ = 0x1,
-            WRITE = 0x2,
+            WRITE = 0x4,
         };
 
     private:
@@ -39,7 +39,7 @@ namespace sylar
     public:
         IOManager(size_t threads=1, bool user_caller=true,const std::string& name = "IOManager");
         ~IOManager();
-        bool addEvent(int fd, Event event, std::function<void()> cb=nullptr);
+        int addEvent(int fd, Event event, std::function<void()> cb=nullptr);
         void delEvent(int fd, Event event);
         void cancelEvent(int fd, Event event);
         void cancelAll(int fd);

@@ -2,8 +2,10 @@
 #include <sys/epoll.h>
 #include <unistd.h> //pipe
 #include <fcntl.h>
-#include<iostream>
-static bool debug=true;
+#include <iostream>
+#include<cstring>
+#include<cassert>
+static bool debug = true;
 namespace sylar
 {
     IOManager::IOManager(size_t threads, bool user_caller, const std::string &name) : Scheduler(threads, user_caller, name), TimeManager()
@@ -75,11 +77,12 @@ namespace sylar
         resetEventContext(ctx);
         return;
     }
-    bool IOManager::addEvent(int fd, Event event, std::function<void()> cb)
+    int IOManager::addEvent(int fd, Event event, std::function<void()> cb)
     {
+        std::cout << "AddEvent: fd = " << fd << ", event = " << (event == WRITE ? "WRITE" : "READ") << std::endl;
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd >int(m_fdContexts.size()))
+        if (fd < int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
@@ -92,6 +95,7 @@ namespace sylar
             fd_ctx = m_fdContexts[fd];
         }
         std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
+        std::cout << "fd_ctx->events = " << fd_ctx->events << std::endl;
         if (fd_ctx->events & event)
         {
             return -1;
@@ -100,10 +104,22 @@ namespace sylar
         epoll_event ev;
         ev.events = EPOLLET | event | fd_ctx->events;
         ev.data.ptr = fd_ctx;
-        epoll_ctl(m_epollfd, op, fd, &ev);
+        //---------------------------
+        std::cout << "addEvent: fd = " << fd 
+          << ", op = " << op 
+          << ", ev = " << ev.events << std::endl;
+          //---------------------------
+        int rt=epoll_ctl(m_epollfd, op, fd, &ev);
+        if(rt){
+            std::cerr<<"epoll_ctl failed "<<strerror(errno)<<std::endl;
+            return -1;
+        }
         m_pendingEventCount++;
+
         fd_ctx->events = Event(fd_ctx->events | event);
+
         FdContext::EventContext &ctx = fd_ctx->getEventContext(event);
+        assert(!ctx.scheduler && !ctx.fiber && !ctx.cb);
         ctx.scheduler = Scheduler::GetThis();
         if (cb)
         {
@@ -112,8 +128,9 @@ namespace sylar
         else
         {
             ctx.fiber = Fiber::GetThis();
+            assert(ctx.fiber->getState() == Fiber::RUNNING);
         }
-        return  0;
+        return 0;
     }
     void IOManager::delEvent(int fd, Event event)
     {
@@ -168,7 +185,7 @@ namespace sylar
     {
         FdContext *fd_ctx = nullptr;
         std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        if (fd >int(m_fdContexts.size()))
+        if (fd > int(m_fdContexts.size()))
         {
             fd_ctx = m_fdContexts[fd];
             read_lock.unlock();
@@ -206,47 +223,68 @@ namespace sylar
     }
     void IOManager::tickle()
     {
+        std::cout<<"tickle"<<std::endl;
         if (!hasIdleThreads())
         {
             return;
         }
-        write(m_tickleFds[0], "T", 1);
+        int rt=write(m_tickleFds[1], "T", 1);
+        assert(rt==1);
     }
     void IOManager::idle()
     {
-        uint64_t MAX_EVENTS = 5000;
+        static const uint64_t MAX_EVENTS = 256;
         std::unique_ptr<epoll_event[]> events(new epoll_event[MAX_EVENTS]);
         while (true)
         {
-            if(debug) std::cout<<"IOManager::idle(),run in thread: "<<Thread::GetThreadId()<<std::endl;
+            if (debug)
+                std::cout << "IOManager::idle(),run in thread: " << Thread::GetThreadId() << std::endl;
             if (stopping())
             {
-                if(debug)std::cout<<"name = "<<getName()<<" idle exits in thred: "<<Thread::GetThreadId()<<std::endl;
+                if (debug)
+                    std::cout << "name = " << getName() << " idle exits in thred: " << Thread::GetThreadId() << std::endl;
                 break;
             }
             int n;
             while (true)
             {
-                uint64_t MAX_TIMEOUT = 5000;
+                static const uint64_t MAX_TIMEOUT = 5000;
                 uint64_t timeout = geteralistTime();
                 uint64_t min = std::min(timeout, MAX_TIMEOUT);
-                n = epoll_wait(m_epollfd, events.get(), MAX_EVENTS, min);
-            }
+                n = epoll_wait(m_epollfd, events.get(), MAX_EVENTS, (int)min);
+                if(n<0&&errno==EINTR){
+                    continue;
+                }else{
+                    break;
+                }
+            };
             // 将超时任务加入队列
             std::vector<std::function<void()>> cbs;
             listExpiredCb(cbs);
-            for (auto &cb : cbs)
+            if (!cbs.empty())
             {
-                scheduleLock(cb);
+                std::cout<<"十分怀疑没进去，果然没进去"<<std::endl;
+                for (auto &cb : cbs)
+                {
+                    scheduleLock(cb);
+                }
+                cbs.clear();
             }
-            cbs.clear();
             for (int i = 0; i < n; i++)
             {
                 epoll_event &ev = events[i];
+                std::cout << "epoll_wait returned event.events = " << ev.events << std::endl;
+                if(ev.data.fd==m_tickleFds[0]){
+                    std::cout<<"有携程通过tickle唤醒epoll了"<<std::endl;
+                    uint8_t dummy[256];
+                    while(read(m_tickleFds[0],dummy,sizeof(dummy))>0);
+                    continue;
+                }
                 FdContext *fd_ctx = (FdContext *)ev.data.ptr;
+                std::lock_guard<std::mutex>lock(fd_ctx->m_mutex);
                 if (ev.events & (EPOLLERR | EPOLLHUP))
                 {
-                    ev.events = ev.events & (EPOLLIN & EPOLLOUT);
+                    ev.events |= fd_ctx->events & (EPOLLIN | EPOLLOUT);
                 }
                 int event = NONE;
                 if (ev.events & EPOLLIN)
@@ -257,21 +295,29 @@ namespace sylar
                 {
                     event |= WRITE;
                 }
-                std::lock_guard<std::mutex> lock(fd_ctx->m_mutex);
-                int op = (ev.events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
-                ev.events = EPOLLET | (ev.events * event);
-                epoll_ctl(m_epollfd, op, fd_ctx->fd, &ev);
+                if((fd_ctx->events&event)==NONE){
+                    continue;
+                }
+                int op = (fd_ctx->events & ~event) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+                ev.events = EPOLLET | (fd_ctx->events& ~event);
+                int rt=epoll_ctl(m_epollfd, op, fd_ctx->fd, &ev);
+                if(rt){
+                    std::cerr<<"idle::epoll_ctl failed "<<strerror(errno)<<std::endl;
+                }
                 if (event & READ)
                 {
+                    std::cout<<"ooooooooooooooo"<<std::endl;
                     fd_ctx->triggerEvent(READ);
                     m_pendingEventCount--;
                 }
                 if (event & WRITE)
                 {
+                    std::cout<<"yyyyyyyyyyyyyyyyyyyyyy"<<std::endl;
                     fd_ctx->triggerEvent(WRITE);
                     m_pendingEventCount--;
                 }
             }
+            std::cout<<"到这说明唤醒epoll了"<<std::endl;
             Fiber::GetThis()->yeid();
         }
     }
@@ -280,7 +326,8 @@ namespace sylar
         uint64_t timeout = geteralistTime();
         return Scheduler::stopping() && timeout == ~0ull && m_pendingEventCount == 0;
     }
-    void IOManager::onTimerInsertedAtFront(){
+    void IOManager::onTimerInsertedAtFront()
+    {
         tickle();
     }
 }

@@ -2,6 +2,7 @@
 #include<sys/stat.h>
 #include<fcntl.h>
 #include<mutex>
+#include<sys/socket.h>
 namespace sylar{
     template class Singleton<FdManager>;
     template <typename T>
@@ -42,15 +43,16 @@ bool FdCtx::init(){
 }
    return m_isInit;
 }
+//SO_SNDTIMEO和SO_RECVTIMEO
 void FdCtx::setTimeout(int type,uint64_t v){
-    if(type==SO_RECVTIMEO){
+    if(type==SO_RCVTIMEO){
         m_recvTimeout=v;
     }else{
         m_sendTimeout=v;
     }
 }
 uint64_t FdCtx::getTimeout(int type){
-    if(type==SO_RECVTIMEO){
+    if(type==SO_RCVTIMEO){
         return m_recvTimeout;
     }
     return m_sendTimeout;
@@ -69,7 +71,7 @@ std::shared_ptr<FdCtx> FdManager::get(int fd,bool auto_create){
         }
         else{
             read_lock.unlock();
-            std::unique_lock<std::shared_lock>write_lock(m_mutex);
+            std::unique_lock<std::shared_mutex> write_lock(m_mutex);
             m_datas.resize(fd*1.5);
             m_datas[fd]=std::shared_ptr<FdCtx>(new FdCtx(fd));
             return m_datas[fd];

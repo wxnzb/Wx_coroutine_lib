@@ -7,6 +7,7 @@
 #include <cstring>  // 用于 strerror()
 #include <cerrno>   // 用于 errno 宏
 #include "fd_manager.h"
+#include<cstdarg>//包含va_list
 #define HOOK_FUN(XX) \
     XX(sleep)        \
     XX(usleep)       \
@@ -114,11 +115,11 @@ int usleep(useconds_t usec)
     }
     std::shared_ptr<sylar::Fiber> fiber = sylar::Fiber::GetThis();
     sylar::IOManager *iom = sylar::IOManager::GetThis();
-    sylar::IOManager *iom = sylar::IOManager::GetThis();
     iom->addTimer(usec / 1000, [fiber, iom]() { // 毫秒
         iom->scheduleLock(fiber, -1);
     });
     fiber->yeid();
+    return 0;
 }
 int nanosleep(const struct timespec *req, struct timespec *rem)
 {
@@ -133,6 +134,7 @@ int nanosleep(const struct timespec *req, struct timespec *rem)
         iom->scheduleLock(fiber, -1);
     });
     fiber->yeid();
+    return 0;
 }
 
 // 套接字函数（socket 网络相关，sys/socket.h）
@@ -213,7 +215,7 @@ int connect_with_timeout(int sockfd, const struct sockaddr *addr, socklen_t addr
          if(!t){
             return;
          }
-         t->cancelled=TIMEOUT;
+         t->cancelled=ETIMEDOUT;
          iom->cancelEvent(sockfd,sylar::IOManager::WRITE); }, wtinfo);
     }
     // 要是连接成功了
@@ -268,7 +270,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
     return connect_with_timeout(sockfd, addr, addrlen, s_connect_timeout);
 }
 template <typename OriginFun, typename... Args>
-static ssize_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t event, int timeout_so, Args &&...args)
+static ssize_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t event, int timeout_so, Args &&... args)
 {
     // 1	判断是否启用 Hook，是否是 socket，是否非阻塞
     if (!sylar::is_hook_enable())
@@ -285,7 +287,7 @@ static ssize_t io_do(int fd, OriginFun fun, const char *hook_fun_name, uint32_t 
         errno = EBADF;
         return -1;
     }
-    if (!fdctx->isSocket || fd->isUserNonblock())
+    if (!fdctx->isSocket() || fdctx->getUserNonblock())
     {
         return fun(fd, std::forward<Args>(args)...);
     }
@@ -315,12 +317,12 @@ retry:
                 return;
             }
             t->cancelled=ETIMEDOUT;
-            iom->caneclEvent(fd,event); }, wtinfo);
+            iom->cancelEvent(fd,(sylar::IOManager::Event)event); }, wtinfo);
         }
         int rt = iom->addEvent(fd, sylar::IOManager::Event(event));
         if (rt)
         {
-            std::cerr << "connect addEvent" << sockfd << " error" << std::endl;
+            std::cerr << "connect addEvent" << socket << " error" << std::endl;
             // 连接失败
             if (timer)
             {
@@ -342,7 +344,7 @@ retry:
                 return -1;
             }
             // 7	IO 就绪恢复后继续调用，或者超时返回
-            go to retry;
+            goto retry;
         }
     }
 }
@@ -353,7 +355,7 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags)
 
 ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen)
 {
-    return io_do(sockfd, sendto_f, "sendto", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, len, flags);
+    return io_do(sockfd, sendto_f, "sendto", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, len, flags, dest_addr, addrlen);
 }
 ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags)
 {
@@ -389,6 +391,8 @@ ssize_t write(int fd, const void *buf, size_t count)
 {
     return io_do(fd, write_f, "write", sylar::IOManager::WRITE, SO_SNDTIMEO, buf, count);
 }
+
+
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 {
     int fd = io_do(sockfd, accept_f, "accept", sylar::IOManager::READ, SO_RCVTIMEO, addr, addrlen);
@@ -431,7 +435,7 @@ int fcntl(int fd, int cmd, ... /* arg */)
     {
         int arg = va_arg(va, int);
         va_end(va);
-        std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdCtx>::GetInstance()->get(fd);
+        std::shared_ptr<sylar::FdCtx> fdctx = sylar::Singleton<sylar::FdManager>::GetInstance()->get(fd);
         if (!fdctx || fdctx->isClose() || !fdctx->isSocket())
         {
             return fcntl_f(fd, cmd, arg);
