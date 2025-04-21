@@ -5,7 +5,7 @@
 #include<fcntl.h>
 #include<cstring>
 #include "iomanager.h"
-int sockfd=-1;
+static int sockfd=-1;
 void test_accept(){
     struct sockaddr_in client_addr;
     memset(&client_addr,0,sizeof(client_addr));
