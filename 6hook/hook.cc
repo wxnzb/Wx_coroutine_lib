@@ -90,8 +90,8 @@ namespace sylar
         {
             InitHook();
         }
-        static struct HookIniter s_hookiniter;
     };
+    static struct HookIniter s_hookiniter;
 }
 unsigned int sleep(unsigned int seconds)
 { // 秒
@@ -322,7 +322,7 @@ retry:
         int rt = iom->addEvent(fd, sylar::IOManager::Event(event));
         if (rt)
         {
-            std::cerr << "connect addEvent" << socket << " error" << std::endl;
+            std::cerr << "connect addEvent" << fd << " error" << std::endl;
             // 连接失败
             if (timer)
             {

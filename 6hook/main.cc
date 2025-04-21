@@ -47,6 +47,7 @@ void test_accept(){
 void test_iomanager(){
     int portno=8080;
     struct sockaddr_in server_addr;
+    memset(&server_addr,0,sizeof(server_addr));
     sockfd=socket(AF_INET,SOCK_STREAM,0);
     if(sockfd<0){
         std::cerr<<"socket error"<<std::endl;
@@ -71,30 +72,6 @@ void test_iomanager(){
     fcntl(sockfd,F_SETFL,O_NONBLOCK);
     sylar::IOManager iom(9);
     iom.addEvent(sockfd,sylar::IOManager::READ,test_accept);
-    // struct sockaddr_in client_addr;
-    // socklen_t client_addr_len=sizeof(client_addr);
-    // int newsockfd=accept(sockfd,(struct sockaddr*)&client_addr,&client_addr_len);
-    // if(newsockfd<0){
-    //     std::cerr<<"accept error"<<std::endl;
-    //     return;
-    // }
-    // char buffer[1024];
-    // ssize_t n=recv(newsockfd,buffer,sizeof(buffer),0);
-    // if(n<0){
-    //     std::cerr<<"recv error"<<std::endl;
-    //     return;
-    // }
-    // std::cout<<"Received: "<<buffer<<std::endl;
-    // const char* response="HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
-    // ssize_t sent=send(newsockfd,response,strlen(response),0);
-    // if(sent<0){
-    //     std::cerr<<"send error"<<std::endl;
-    //     return;
-    // }
-    // std::cout<<"Sent: "<<response<<std::endl;
-    // close(newsockfd);
-    // close(sockfd);
-    // std::cout<<"Server closed"<<std::endl;
 }
 int main(){
     test_iomanager();
